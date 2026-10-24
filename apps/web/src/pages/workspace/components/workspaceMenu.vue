@@ -2,6 +2,10 @@
   <div class="workspaceMenu">
     <el-card shadow="never" :bodyStyle="{ padding: '3px 6px' }">
       <div class="menuContent">
+        <sessionMenu />
+        <el-button class="toolButton" text aria-label="生成任务" title="生成任务" @click="tasksVisible = true">
+          <icon-list-details :size="18" aria-hidden="true" />
+        </el-button>
         <el-button class="toolButton" text aria-label="退出项目" title="退出项目" @click="exitVisible = true">
           <icon-logout :size="18" aria-hidden="true" />
         </el-button>
@@ -12,6 +16,7 @@
         </el-button>
       </div>
     </el-card>
+    <mediaTasks v-model="tasksVisible" />
     <el-dialog v-model="exitVisible" title="退出项目" width="360px" alignCenter appendToBody>
       <span>是否退出当前项目并返回首页？</span>
       <template #footer>
@@ -25,13 +30,16 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useRouter } from "vue-router";
-import { IconLogout, IconSettings } from "@tabler/icons-vue";
+import { IconLogout, IconSettings, IconListDetails } from "@tabler/icons-vue";
 import { hasDesktopUpdate } from "@/stores/desktopUpdate";
+import mediaTasks from "./mediaTasks.vue";
+import sessionMenu from "@/components/sessionMenu.vue";
 
 const emit = defineEmits<{ openSettings: [] }>();
 const router = useRouter();
 const exitVisible = ref(false);
 const leaving = ref(false);
+const tasksVisible = ref(false);
 
 async function exitProject() {
   if (leaving.value) return;

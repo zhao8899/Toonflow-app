@@ -12,8 +12,8 @@ export function documentError(error: unknown) {
   return axios.isAxiosError(error) ? error.response?.data?.message || error.message : error instanceof Error ? error.message : t`文档操作失败`;
 }
 
-export function createDocumentSession(resource: ExtResource, extension: ExtDefinition, mountNode: ExtContext["mountNode"], observeNode?: NodeObserver, onDeleted?: () => void, openFile?: ExtContext["openFile"]) {
-  const files = useWorkspaceFiles(resource.directory);
+export function createDocumentSession(resource: ExtResource, extension: ExtDefinition, mountNode: ExtContext["mountNode"], observeNode?: NodeObserver, onDeleted?: () => void, openFile?: ExtContext["openFile"], projectId?: string) {
+  const files = useWorkspaceFiles(resource.directory, projectId);
   let disposed = false;
   let revision = 0;
   let readController: AbortController | undefined;

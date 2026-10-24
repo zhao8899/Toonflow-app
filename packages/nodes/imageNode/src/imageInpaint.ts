@@ -32,12 +32,11 @@ export function useImageInpaint() {
       throw new Error("局部重绘素材无效，请重新创建重绘节点");
     }
     const workspace = files.getWorkspaceFiles();
-    const temporaryId = crypto.randomUUID();
+    const generationId = crypto.randomUUID();
     const canvas = document.createElement("canvas");
     const urls: string[] = [];
     let outputPath = "";
     let committed = false;
-    let requested = false;
 
     async function readImage(path: string, mimeType = "image/png") {
       const content = await workspace.read(path);
@@ -66,12 +65,11 @@ export function useImageInpaint() {
       if (!context.getImageData(0, 0, canvas.width, canvas.height).data.some((value, index) => index % 4 === 3 && value)) throw new Error("局部重绘蒙版为空，请重新涂抹区域");
       const { directory } = await workspace.list();
       signal.throwIfAborted();
-      requested = true;
       // ACT: 供应商尚未统一支持原生 mask；使用涂色参考引导，再按本地蒙版合成，严格保留区域外像素。
       const [result] = await ai.generateImage(buildInpaintRequest({
         ...input,
         directory,
-        outputDirectory: `assets/${temporaryId}`,
+        outputDirectory: `assets/${generationId}`,
       }, inpaint), signal);
       signal.throwIfAborted();
       if (!result) throw new Error("供应商未返回图片");
@@ -87,10 +85,7 @@ export function useImageInpaint() {
       outputPath = await uploadNodeFile(workspace, id, new File([blob], "image.png", { type: "image/png" }));
       signal.throwIfAborted();
       if (findNode(id) !== node) throw new Error("重绘节点已移除");
-      await workspace.remove(`assets/${temporaryId}`, true).catch(error => {
-        if (error?.response?.data?.data?.code !== "ENOENT") showNodeError(error, "重绘临时文件清理失败");
-      });
-      requested = false;
+      // ACT: 原始生成结果由任务中心保留，不能在蒙版合成后或页面离开时删除。
       signal.throwIfAborted();
       committed = true;
       return [{ path: outputPath, mimeType: "image/png", mediaType: "image" }];
@@ -98,9 +93,6 @@ export function useImageInpaint() {
       urls.forEach(url => URL.revokeObjectURL(url));
       canvas.width = canvas.height = 0;
       if (outputPath && !committed) await workspace.remove(outputPath).catch(error => showNodeError(error, "重绘临时文件清理失败"));
-      if (requested) await workspace.remove(`assets/${temporaryId}`, true).catch(error => {
-        if (error?.response?.data?.data?.code !== "ENOENT") showNodeError(error, "重绘临时文件清理失败");
-      });
     }
   };
 }

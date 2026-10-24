@@ -12,6 +12,8 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     About: typeof import('./../components/settings/panels/about.vue')['default']
+    AccountAudit: typeof import('./../components/accountAudit.vue')['default']
+    AccountManagement: typeof import('./../components/accountManagement.vue')['default']
     Agent: typeof import('./../components/agent/index.vue')['default']
     AttachmentList: typeof import('./../components/agent/attachmentList.vue')['default']
     AttachmentPreview: typeof import('./../components/agent/attachmentPreview.vue')['default']
@@ -33,6 +35,7 @@ declare module 'vue' {
     ElContainer: typeof import('element-plus/es')['ElContainer']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDivider: typeof import('element-plus/es')['ElDivider']
+    ElDrawer: typeof import('element-plus/es')['ElDrawer']
     ElDropdown: typeof import('element-plus/es')['ElDropdown']
     ElDropdownItem: typeof import('element-plus/es')['ElDropdownItem']
     ElDropdownMenu: typeof import('element-plus/es')['ElDropdownMenu']
@@ -92,6 +95,7 @@ declare module 'vue' {
     KeyInput: typeof import('./../components/settings/panels/general/keyInput.vue')['default']
     LanguageModel: typeof import('./../components/settings/panels/languageModel/index.vue')['default']
     LanguageSelect: typeof import('./../components/languageSelect.vue')['default']
+    LoginForm: typeof import('./../components/loginForm.vue')['default']
     MarkdownImage: typeof import('./../components/markdownImage.vue')['default']
     Mcp: typeof import('./../components/settings/panels/mcp/index.vue')['default']
     MediaModel: typeof import('./../components/settings/panels/mediaModel/index.vue')['default']
@@ -108,6 +112,7 @@ declare module 'vue' {
     Privacy: typeof import('./../components/settings/panels/privacy.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SessionMenu: typeof import('./../components/sessionMenu.vue')['default']
     Settings: typeof import('./../components/settings/index.vue')['default']
     SingleAgentDialog: typeof import('./../components/singleAgentDialog.vue')['default']
     SkillMenu: typeof import('./../components/agent/skillMenu.vue')['default']

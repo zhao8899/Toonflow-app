@@ -75,6 +75,7 @@ function canonicalCanvasPath(path: string) {
 }
 
 async function ensureCanvas(fileName: string, signal?: AbortSignal, activate = false) {
+  const project = workspaceStore.project;
   const callSignal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(120000), ...(signal ? [signal] : [])]);
   callSignal.throwIfAborted();
   fileName = relativePath(fileName);
@@ -83,9 +84,10 @@ async function ensureCanvas(fileName: string, signal?: AbortSignal, activate = f
   }
   fileName = canonicalCanvasPath(fileName);
   if (!canvases.value.some(canvas => canvas.id === fileName)) {
-    const directory = workspaceStore.project?.directory;
+    const directory = project?.directory;
     if (!directory) throw new Error("请先选择工作目录");
-    const data = await useWorkspaceFiles(directory).readJson<{ toonflowCanvas?: boolean; nodes?: unknown[]; edges?: unknown[]; viewport?: { x: number; y: number; zoom: number } }>(fileName);
+    checkDirectory(directory);
+    const data = await useWorkspaceFiles(directory, project?.serverProjectId).readJson<{ toonflowCanvas?: boolean; nodes?: unknown[]; edges?: unknown[]; viewport?: { x: number; y: number; zoom: number } }>(fileName);
     checkDirectory(directory);
     callSignal.throwIfAborted();
     if (data?.toonflowCanvas !== true || !Array.isArray(data.nodes) || !Array.isArray(data.edges) || !data.viewport
@@ -181,7 +183,7 @@ async function readDocumentCanvases(directory: string, options: DocumentNodeOpti
   const live = [...instances.values()].filter(panel => panel.canvasId && (!path || identity(panel.canvasId) === identity(path)));
   // 已加载画布直接取实时节点；展开单个 JSON 不再扫描其余画布和素材目录。
   if (path && live.length) return new Map(live.map(panel => [identity(panel.canvasId), { path: panel.canvasId, nodes: panel.getMentionNodes() }]));
-  const stored = await readCanvasFiles(useWorkspaceFiles(directory), path, { signal, onError: options.onError });
+  const stored = await readCanvasFiles(useWorkspaceFiles(directory, workspaceStore.project?.serverProjectId), path, { signal, onError: options.onError });
   checkDirectory(directory);
   signal.throwIfAborted();
   const sources = new Map(stored.map(canvas => [identity(canvas.id), { path: canvas.id, nodes: canvas.data.nodes }]));
@@ -273,7 +275,7 @@ async function performFileAction(directory: string, action: "copy" | "rename" | 
       return;
     }
     if (action === "rename" || action === "move") checkNodeResources(path);
-    const files = useWorkspaceFiles(directory);
+    const files = useWorkspaceFiles(directory, workspaceStore.project?.serverProjectId);
     const deletingPanels = new Set<CanvasInstance>();
     if (action === "delete") {
       const stored = await readCanvasFiles(files, path);
@@ -395,8 +397,9 @@ const mentionSource: MentionCanvasSource = {
     if (!node) throw new Error("节点已删除，请重新选择");
     const directory = workspaceStore.project?.directory;
     if (!directory) throw new Error("请先打开工作区");
+    const files = useWorkspaceFiles(directory, workspaceStore.project?.serverProjectId);
     return createCanvasMention(node, canvasId, outputId, async path => {
-      const text = await useWorkspaceFiles(directory).readText(path, 400001);
+      const text = await files.readText(path, 400001);
       if (text.length > 100000) throw new Error("文本引用最多支持 100000 个字符，请缩小内容后重试");
       return text;
     });

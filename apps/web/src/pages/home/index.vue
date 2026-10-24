@@ -3,10 +3,11 @@
     <bg class="pageBackground" />
     <el-header class="pageHeader">
       <div class="headerActions">
+        <sessionMenu />
         <el-badge isDot :hidden="!hasDesktopUpdate">
           <el-button round size="large" :icon="IconSettings" :aria-label="hasDesktopUpdate ? '设置，有新版本可用' : '设置'" @click="settingsVisible = true">设置</el-button>
         </el-badge>
-        <el-button round size="large" :type="deviceHubEnabled ? 'success' : undefined" :plain="deviceHubEnabled" :icon="deviceHubEnabled || mobileConnection.mode === 'remote' ? IconDeviceDesktop : IconQrcode" @click="mobileConnectVisible = true">{{ mobileConnectionLabel }}</el-button>
+        <el-button v-if="!authRequired" round size="large" :type="deviceHubEnabled ? 'success' : undefined" :plain="deviceHubEnabled" :icon="deviceHubEnabled || mobileConnection.mode === 'remote' ? IconDeviceDesktop : IconQrcode" @click="mobileConnectVisible = true">{{ mobileConnectionLabel }}</el-button>
       </div>
       <div class="githubAction">
         <span class="arrowHint starHint">
@@ -60,6 +61,7 @@
         <div class="sectionHeader">
           <h2 id="projectListTitle">项目列表</h2>
           <el-space wrap>
+            <serverProjects v-if="authRequired" :disabled="creating || opening" @open="openServerProject" />
             <el-button :icon="IconFolderOpen" :disabled="creating || opening" @click="openProject()">导入项目</el-button>
             <el-button :icon="IconFolderPlus" :disabled="creating || opening" @click="createProject(false)">添加项目</el-button>
             <el-button circle :icon="sortDescending ? IconSortDescending : IconSortAscending" :aria-label="sortDescending ? '按时间降序' : '按时间升序'" @click="sortDescending = !sortDescending" />
@@ -118,8 +120,11 @@ import { hasDesktopUpdate } from "@/stores/desktopUpdate";
 import { deviceHubEnabled, mobileConnection, mobileConnectionLabel } from "@/lib/mobile";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import settings from "@/components/settings/index.vue";
+import sessionMenu from "@/components/sessionMenu.vue";
+import { authRequired } from "@/lib/auth";
 import bg from "./bg.vue";
 import workspacePicker from "./workspacePicker.vue";
+import serverProjects from "./serverProjects.vue";
 
 const settingsVisible = ref(false);
 const mobileConnectVisible = ref(false);
@@ -316,7 +321,20 @@ async function restoreAttachment(index: number) {
   }
 }
 
+async function openServerProject(id: string) {
+  if (creating.value || opening.value) return;
+  opening.value = true;
+  try {
+    await workspaceStore.openServerProject(id);
+    await router.push("/workspace");
+  } catch (error) {
+    ElMessage.error(axios.isAxiosError<{ message?: string }>(error)
+      ? error.response?.data?.message || "无法打开已登记目录" : "无法打开已登记目录");
+  } finally { opening.value = false; }
+}
+
 async function openProject(project?: Project) {
+  if (project?.serverProjectId) return openServerProject(project.serverProjectId);
   if (creating.value || opening.value) return;
   opening.value = true;
   try {

@@ -2,7 +2,7 @@ import { onScopeDispose } from "vue";
 import { runAgentLoop, type AgentTool, type AgentToolResult } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type AssistantMessage, type Context, type Message, type Model } from "@earendil-works/pi-ai";
 import { EventSourceParserStream } from "eventsource-parser/stream";
-import type { MediaGenerationRequest, MediaModel } from "@toonflow/tools-scaffold/runtime";
+import type { MediaGenerationRequest, MediaModel, MediaTask } from "@toonflow/tools-scaffold/runtime";
 import type { NodeOutput } from "./values";
 
 export type NodeAiModel = {
@@ -248,12 +248,42 @@ export function useNodeAi() {
   }
 
   async function generateMedia<T extends "image" | "video" | "audio">(mediaType: T, input: NodeImageRequest | NodeVideoRequest | NodeAudioRequest, signal?: AbortSignal) {
-    return readResult<{ path: string; mimeType: string; mediaType: T }[]>(await fetch("/api/ai/media/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-toonflow-workspace": "1" },
-      body: JSON.stringify({ ...input, mediaType }),
-      signal: requestSignal(signal),
-    }));
+    const waitingSignal = requestSignal(signal);
+    waitingSignal.throwIfAborted();
+    const requestId = crypto.randomUUID();
+    const directory = input.directory;
+    const headers = { "Content-Type": "application/json", "x-toonflow-workspace": "1" };
+    const query = new URLSearchParams({ directory, id: requestId });
+    try {
+      let task = await readResult<MediaTask>(await fetch("/api/ai/media/tasks/create", {
+        method: "POST", headers, body: JSON.stringify({ ...input, mediaType, requestId }),
+        signal: AbortSignal.any([waitingSignal, AbortSignal.timeout(20000)]),
+      }));
+      while (["queued", "running", "saving", "cancelling"].includes(task.status)) {
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => { clearTimeout(timer); waitingSignal.removeEventListener("abort", abort); reject(waitingSignal.reason); };
+          const timer = setTimeout(() => { waitingSignal.removeEventListener("abort", abort); resolve(); }, 2000);
+          waitingSignal.addEventListener("abort", abort, { once: true });
+          if (waitingSignal.aborted) abort();
+        });
+        task = await readResult<MediaTask>(await fetch(`/api/ai/media/tasks/get?${query}`, {
+          headers, cache: "no-store", signal: AbortSignal.any([waitingSignal, AbortSignal.timeout(20000)]),
+        }));
+      }
+      if (task.status !== "succeeded") throw new Error(task.error || "生成未完成");
+      return task.files as { path: string; mimeType: string; mediaType: T }[];
+    } catch (error) {
+      // ACT: 离开节点只停止等待；主动点击停止则请求取消，供应商是否退款仍需核对。
+      if (signal?.aborted && !controller.signal.aborted) {
+        try {
+          await readResult<MediaTask>(await fetch("/api/ai/media/tasks/cancel", {
+            method: "POST", headers, body: JSON.stringify({ directory, id: requestId }), signal: AbortSignal.timeout(10000),
+          }));
+        } catch { throw new Error(`取消未确认，请到生成任务中查看（${requestId}）`); }
+      }
+      if (waitingSignal.aborted) throw waitingSignal.reason;
+      throw new Error(`${error instanceof Error ? error.message : "任务连接中断"}；请到生成任务查看状态，勿重复提交（${requestId}）`);
+    }
   }
 
   function generateImage(input: NodeImageRequest, signal?: AbortSignal) {

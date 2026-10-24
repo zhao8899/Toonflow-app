@@ -43,6 +43,7 @@ const props = defineProps<{
 }>();
 const workspace = useWorkspaceStore();
 const directory = workspace.project?.directory;
+const projectId = workspace.project?.serverProjectId;
 const editorApi = shallowRef<DockviewApi>();
 const activeSelection = shallowRef<TreeSelection>();
 const sessions = new Map<string, DocumentSession>();
@@ -244,16 +245,16 @@ async function openSelectionNow(selection: TreeSelection, signal: AbortSignal, f
   const revision = fileRevision;
   signal.throwIfAborted();
   if (changingFiles) throw new Error("文件操作尚未完成，请稍后再打开");
-  if (!directory || workspace.project?.directory !== directory) throw new Error("工作目录已切换");
+  if (!directory || workspace.project?.directory !== directory || workspace.project?.serverProjectId !== projectId) throw new Error("工作目录已切换");
   const api = await waitForControlValue(() => editorApi.value, signal);
   const resource: ExtResource = "filePath" in selection
     ? { kind: "file", directory, path: relativePath(selection.filePath), label: selection.label }
     : { kind: "canvasNode", directory, path: relativePath(selection.canvasPath), nodeId: selection.nodeId, label: selection.label };
-  if (resource.kind === "file" && /\.json$/i.test(resource.path) && await isCanvasFile(useWorkspaceFiles(directory), resource.path)) {
+  if (resource.kind === "file" && /\.json$/i.test(resource.path) && await isCanvasFile(useWorkspaceFiles(directory, projectId), resource.path)) {
     throw new Error("画布文件请展开后打开节点，不能作为普通文本编辑");
   }
   signal.throwIfAborted();
-  if (changingFiles || revision !== fileRevision || workspace.project?.directory !== directory) throw new Error("文件或工作目录已变更，请重新打开");
+  if (changingFiles || revision !== fileRevision || workspace.project?.directory !== directory || workspace.project?.serverProjectId !== projectId) throw new Error("文件或工作目录已变更，请重新打开");
   const resourceId = JSON.stringify([resource.kind, directory, pathIdentity(resource.path), resource.kind === "canvasNode" ? resource.nodeId : ""]);
   const matching = [...sessions].filter(([, session]) => {
     const current = session.context.resource;
@@ -297,7 +298,7 @@ async function openSelectionNow(selection: TreeSelection, signal: AbortSignal, f
     for (const [viewId, current] of [...sessions]) if (current === concurrent[1]) await closeEditor(viewId);
   }
   signal.throwIfAborted();
-  if (changingFiles || revision !== fileRevision || workspace.project?.directory !== directory) throw new Error("文件或工作目录已变更，请重新打开");
+  if (changingFiles || revision !== fileRevision || workspace.project?.directory !== directory || workspace.project?.serverProjectId !== projectId) throw new Error("文件或工作目录已变更，请重新打开");
   if (preview && !restoring && !restoredId) {
     for (const panel of [...(api.activeGroup?.panels ?? [])]) {
       if (!views.get(panel.id)?.preview) continue;
@@ -319,7 +320,7 @@ async function openSelectionNow(selection: TreeSelection, signal: AbortSignal, f
     }, async path => {
       await openSelection({ filePath: path, label: path.split("/").at(-1)! });
       refreshFileTree();
-    });
+    }, projectId);
   session.context.active = active.value;
   session.extensionChanged = !!olderSession;
   extensionVersions.set(id, olderSession ? "pending-update" : extensionRevision(extension.id));
@@ -469,12 +470,12 @@ async function openSearchResult(location: { path: string; line: number; column: 
 }
 
 async function replaceSearchFile(path: string, expectedText: string, nextText: string) {
-  if (!directory || workspace.project?.directory !== directory || changingFiles) throw new Error("工作区或文件正在变更，请重新搜索");
+  if (!directory || workspace.project?.directory !== directory || workspace.project?.serverProjectId !== projectId || changingFiles) throw new Error("工作区或文件正在变更，请重新搜索");
   path = relativePath(path);
   changingFiles = true;
   fileRevision++;
   try {
-    const files = useWorkspaceFiles(directory);
+    const files = useWorkspaceFiles(directory, projectId);
     if (/\.json$/i.test(path) && await isCanvasFile(files, path)) throw new Error("画布 JSON 不支持全文替换，请编辑节点内容");
     const node = await props.resolveNodeFile(directory, path);
     if (node) {
@@ -517,12 +518,12 @@ async function refreshExtensions() {
 }
 
 async function executeFileAction(action: FileAction, item: FileTreeItem, target?: string) {
-  if (!directory || workspace.project?.directory !== directory) throw new Error("工作目录已切换");
+  if (!directory || workspace.project?.directory !== directory || workspace.project?.serverProjectId !== projectId) throw new Error("工作目录已切换");
   if (action === "openWith") {
     await openSelection({ filePath: item.path, label: item.name }, lifetime.signal, true);
     return;
   }
-  const files = useWorkspaceFiles(directory);
+  const files = useWorkspaceFiles(directory, projectId);
   if (action === "reveal") return files.reveal(item.path);
   if (action === "create") return files.write(item.path, "", true);
   if (action === "mkdir") return files.mkdir(item.path);

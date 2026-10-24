@@ -1,5 +1,5 @@
 import { t, translateMessage } from "@/lib/i18n";
-import { mkdir, readFile, realpath, stat, unlink } from "@toonflow/file";
+import { mkdir, readFile, realpath, stat } from "@toonflow/file";
 import { join, relative } from "node:path";
 import { mediaProviders, type Provider } from "@toonflow/providers";
 import type { GeneratedMedia, MediaGenerationRequest, MediaModel, MediaReference } from "@toonflow/tools-scaffold/runtime";
@@ -8,6 +8,7 @@ import { getMediaProvider, listMediaProviders, loadMediaProviderSource } from "@
 import { lockWorkspaceFiles, resolveWorkspacePath, writeWorkspaceFile } from "@/utils/workspace/files";
 import { beginGeneration, getProviderPrice } from "@/utils/media/billing";
 import { detectMimeType, readPriceReference } from "@/utils/media/priceReference";
+import { startMediaTask } from "@/utils/media/tasks";
 
 const maxMediaSize = 100 * 1024 * 1024;
 const mediaExtensions: Record<string, string> = {
@@ -161,11 +162,12 @@ export async function getMediaPrice(directory: string | undefined, mediaType: "i
   return getProviderPrice(provider, prepared);
 }
 
-export async function generateMedia(
+async function executeGeneration(
   cwd: string,
   mediaType: "image" | "video" | "audio",
   request: MediaGenerationRequest,
   signal?: AbortSignal,
+  progress?: (status: "running" | "saving", files?: GeneratedMedia[]) => void,
 ): Promise<GeneratedMedia[]> {
   signal?.throwIfAborted();
   if (!request.prompt.trim()) invalid("请输入生成提示词");
@@ -180,14 +182,15 @@ export async function generateMedia(
   const prepared = await prepareRequest(directory, mediaType, request, readReference, signal);
   signal?.throwIfAborted();
   const finish = beginGeneration(provider);
-  const written: string[] = [];
   const result: GeneratedMedia[] = [];
   try {
     signal?.throwIfAborted();
     const { type, ...parameters } = prepared;
+    progress?.("running");
     const assets = type === "audio" ? await provider.generateAudio!(parameters as AudioRequest)
       : type === "image" ? await provider.generateImage!(parameters as ImageRequest) : await provider.generateVideo!(parameters as VideoRequest);
     if (!Array.isArray(assets) || !assets.length) invalid("供应商未返回生成结果");
+    progress?.("saving");
     for (const asset of assets) {
       signal?.throwIfAborted();
       const { bytes, mimeType } = await assetBytes(asset, mediaType, signal);
@@ -200,15 +203,25 @@ export async function generateMedia(
         const { path } = await resolveWorkspacePath(directory, file);
         signal?.throwIfAborted();
         await writeWorkspaceFile(path, bytes, true);
-        written.push(path);
         result.push({ path: relative(directory, path).replace(/\\/g, "/"), mimeType, mediaType });
+        progress?.("saving", result);
       } finally { release(); }
     }
     signal?.throwIfAborted();
     return result;
-  } catch (err) {
-    // ACT: 只回滚本次创建的文件，保留目录中已有的节点资源。
-    await Promise.all(written.map(path => unlink(path).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; })));
-    throw err;
   } finally { finish(); }
+}
+
+export async function submitMediaGeneration(cwd: string, mediaType: "image" | "video" | "audio", request: MediaGenerationRequest, id: string) {
+  const directory = await realpath(cwd);
+  return startMediaTask(directory, mediaType, request, (signal, progress) => executeGeneration(directory, mediaType, request, signal, progress), id).task;
+}
+
+export async function generateMedia(cwd: string, mediaType: "image" | "video" | "audio", request: MediaGenerationRequest, signal?: AbortSignal): Promise<GeneratedMedia[]> {
+  const directory = await realpath(cwd);
+  const { completion } = startMediaTask(directory, mediaType, request,
+    (taskSignal, progress) => executeGeneration(directory, mediaType, request, taskSignal, progress), undefined, signal);
+  const task = await completion;
+  if (task.status !== "succeeded") throw new Error(`${task.error ?? "生成未完成"}（任务 ${task.id}）`);
+  return task.files;
 }

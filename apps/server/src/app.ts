@@ -6,9 +6,10 @@ import { resolve } from "node:path";
 import { readFile } from "@toonflow/file";
 import type { Request, Response, NextFunction } from "express";
 import buildRoute from "@/core";
-import { errorFromCause } from "@/lib/responseFormat";
+import { error, errorFromCause } from "@/lib/responseFormat";
 import desktopRequest from "@/lib/desktop";
 import { getRuntimePlatform } from "@/lib/platform";
+import { requireAdministrator } from "@/lib/middleware";
 import initializePlugins from "@/utils/plugins/initialize";
 import { languageRequest, resolveRequestLocale, runWithLocale, setLocaleFallback, translateError, translateMessage } from "@/lib/i18n";
 import { detectLocale, normalizeLocale } from "@toonflow/i18n";
@@ -72,6 +73,8 @@ export async function createApp({
   if (dataDirectory && agentsRoot) await initializePlugins(resolve(dataDirectory, "agents"), agentsRoot);
   const app = express();
   app.locals.appVersion = appVersion;
+  const { initializeAccess, requireAccess, limitLogin } = await import("@/utils/user/access");
+  app.locals.authRequired = initializeAccess();
 
   if (getRuntimePlatform().development) {
     await buildRoute();
@@ -79,10 +82,25 @@ export async function createApp({
   }
   app.use(cors());
   app.use(languageRequest);
+  app.use("/api", requireAccess);
+  app.use(["/mcp", "/a2a"], (_req, res, next) => {
+    if (!app.locals.authRequired) return next();
+    res.status(403).json(error("登录保护模式暂不开放外部 MCP 和 A2A 入口", null, 403));
+  });
   app.use("/a2a", express.json({ limit: "2mb" }));
+  app.use(["/api/auth/login", "/api/auth/changePassword"], limitLogin, express.json({ limit: "16kb" }), express.urlencoded({ extended: true, limit: "16kb" }));
+  app.use("/api/users/create", limitLogin, express.json({ limit: "16kb" }), express.urlencoded({ extended: true, limit: "16kb" }));
   app.use(["/api/workspaces/files/write", "/api/assets/save"], express.raw({ type: "application/octet-stream", limit: "100mb" }));
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ extended: true, limit: "100mb" }));
+  const { resolveRequestProject } = await import("@/utils/workspace/projects");
+  app.use(["/api/ai/media/tasks", "/api/workspaces/files"], (req, res, next) => {
+    if (req.get("x-toonflow-project-id") === undefined) return next();
+    return requireAdministrator(req, res, next);
+  }, async (req, res, next) => {
+    if (req.get("x-toonflow-project-id") !== undefined) res.locals.project = await resolveRequestProject(req);
+    next();
+  });
   app.use("/api/desktop", desktopRequest);
 
   const { default: initializeProviderModels } = await import("@/utils/ai/initialize");

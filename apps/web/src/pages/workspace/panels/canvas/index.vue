@@ -393,7 +393,7 @@ function documentHandles(node: Node<DocumentNodeData>) {
 
 async function readDocumentCanvas(directory: string, canvasPath: string, nodeId: string) {
   checkDocumentDirectory(directory);
-  const files = useWorkspaceFiles(directory);
+  const files = useWorkspaceFiles(directory, project.value?.serverProjectId);
   const canvas = await files.readJson<{ toonflowCanvas?: boolean; nodes?: Node<DocumentNodeData>[] }>(canvasPath);
   checkDocumentDirectory(directory);
   if (canvas?.toonflowCanvas !== true || !Array.isArray(canvas.nodes)) throw new Error("文件不是有效画布");
@@ -556,13 +556,13 @@ let savePaused = false;
 let saveCancelled = false;
 let changedWhilePaused = false;
 let saveRevision = 0;
-const saveCanvas = debounce((directory: string, fileName: string) => {
+const saveCanvas = debounce((directory: string, fileName: string, projectId?: string) => {
   const flow = toObject();
   const revision = saveRevision;
   // ACT: 同页保存按顺序完成，防止慢请求覆盖后续修改；不处理多个客户端的并发编辑。
   saving = saving.then(async () => {
     try {
-      await useWorkspaceFiles(directory).writeJson(fileName, { toonflowCanvas: true, nodes: flow.nodes, edges: flow.edges, viewport: flow.viewport });
+      await useWorkspaceFiles(directory, projectId).writeJson(fileName, { toonflowCanvas: true, nodes: flow.nodes, edges: flow.edges, viewport: flow.viewport });
       saveError = undefined;
       canvasSaveError.value = "";
       if (revision === saveRevision) canvasDirty.value = false;
@@ -589,7 +589,7 @@ function scheduleCanvasSave() {
     return;
   }
   const directory = project.value?.directory;
-  if (directory && canvasId.value) saveCanvas(directory, canvasId.value);
+  if (directory && canvasId.value) saveCanvas(directory, canvasId.value, project.value?.serverProjectId);
 }
 
 function scheduleCanvasChange() {
@@ -699,7 +699,7 @@ async function saveCanvasState(action?: () => Promise<void>) {
   await Promise.all(flow.getNodes.value.map((node) => useNodeEvent(node.id, flow).emit("save")));
   await nextTick();
   if (saveCancelled) throw new Error("画布保存已取消");
-  if (saveError && project.value?.directory && canvasId.value) saveCanvas(project.value.directory, canvasId.value);
+  if (saveError && project.value?.directory && canvasId.value) saveCanvas(project.value.directory, canvasId.value, project.value.serverProjectId);
   if (action) savePaused = true;
   try {
     let revision: number;
@@ -707,7 +707,7 @@ async function saveCanvasState(action?: () => Promise<void>) {
       if (saveCancelled) throw new Error("画布保存已取消");
       revision = saveRevision;
       if (changedWhilePaused && project.value?.directory && canvasId.value) {
-        saveCanvas(project.value.directory, canvasId.value);
+        saveCanvas(project.value.directory, canvasId.value, project.value.serverProjectId);
         changedWhilePaused = false;
       }
       saveCanvas.flush();
@@ -722,7 +722,7 @@ async function saveCanvasState(action?: () => Promise<void>) {
   } finally {
     if (action && !saveCancelled) {
       savePaused = false;
-      if (changedWhilePaused && project.value?.directory && canvasId.value) saveCanvas(project.value.directory, canvasId.value);
+      if (changedWhilePaused && project.value?.directory && canvasId.value) saveCanvas(project.value.directory, canvasId.value, project.value.serverProjectId);
       changedWhilePaused = false;
     }
   }
@@ -765,7 +765,8 @@ function imageOutput(data: { outputs?: Record<string, NodeOutput | undefined> } 
 async function copyImageNodeToClipboard(directory: string, node: Parameters<typeof copyNodeToClipboard>[0]) {
   const output = imageOutput(node.data);
   if (!output) return false;
-  const content = await useWorkspaceFiles(directory).read(output.url);
+  checkDocumentDirectory(directory);
+  const content = await useWorkspaceFiles(directory, project.value?.serverProjectId).read(output.url);
   await writeClipboardImage(new Blob([content], { type: output.mimeType || "image/png" }));
   return true;
 }
@@ -1061,7 +1062,7 @@ provide("nodeConfig", (nodeType: string) => nodeConfigs.value[nodeType] ?? {});
 provide("workspaceFiles", () => {
   const directory = project.value?.directory;
   if (!directory) throw new Error("请先选择工作目录");
-  return useWorkspaceFiles(directory);
+  return useWorkspaceFiles(directory, project.value?.serverProjectId);
 });
 provide("workspaceDirectory", () => {
   const directory = project.value?.directory;

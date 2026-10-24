@@ -6,6 +6,7 @@ import * as providerDebug from "@/utils/media/debug";
 import * as mediaGeneration from "@/utils/media/generation";
 import * as mediaProvider from "@/utils/media/provider";
 import * as mediaBilling from "@/utils/media/billing";
+import * as mediaTasks from "@/utils/media/tasks";
 import * as ffmpeg from "@/utils/ffmpeg";
 import * as pluginInstall from "@/utils/plugins/install";
 import conf, { cleanNodeMenuSettings, removeLegacySettings } from "@/utils/conf";
@@ -17,6 +18,7 @@ import * as agent from "@/agent";
 import * as canvas from "@/agent/bridge/canvas";
 import * as question from "@/agent/bridge/question";
 import * as workspace from "@/utils/workspace";
+import * as projects from "@/utils/workspace/projects";
 import * as workspaceFile from "@/utils/workspace/files";
 import * as chatImages from "@/utils/workspace/chatImages";
 import * as skillFile from "@/utils/skills/files";
@@ -27,6 +29,11 @@ import * as teams from "@/utils/teams";
 import * as a2aSettings from "@/agent/a2a/settings";
 import * as personalization from "@/utils/personalization";
 import * as mentionFiles from "@/agent/mentionFiles";
+import userManager from "@/utils/user/manager";
+import * as userTypes from "@/utils/user/types";
+import * as jwt from "@/utils/user/jwt";
+import * as providerConfig from "@/utils/user/providerConfig";
+import * as userAccess from "@/utils/user/access";
 
 export default {
   assets,
@@ -37,6 +44,7 @@ export default {
   mediaGeneration,
   mediaProvider,
   mediaBilling,
+  mediaTasks,
   ffmpeg,
   pluginInstall,
   conf,
@@ -50,6 +58,7 @@ export default {
   canvas,
   question,
   workspace,
+  projects,
   workspaceFile,
   chatImages,
   skillFile,
@@ -60,4 +69,9 @@ export default {
   a2aSettings,
   personalization,
   mentionFiles,
+  userManager,
+  userTypes,
+  jwt,
+  providerConfig,
+  userAccess,
 };

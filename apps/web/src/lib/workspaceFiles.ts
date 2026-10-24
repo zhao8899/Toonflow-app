@@ -24,35 +24,41 @@ function invalidateUrls(directory: string, path: string) {
   }
 }
 
-export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | undefined>) {
+export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | undefined>, projectId?: MaybeRefOrGetter<string | undefined>) {
   const workspace = directory === undefined ? useWorkspaceStore() : undefined;
-  function getDirectory() {
-    const path = directory === undefined ? workspace?.project?.directory : toValue(directory);
+  function getContext() {
+    const project = workspace?.project;
+    const path = directory === undefined ? project?.directory : toValue(directory);
     if (!path) throw new Error("请先选择工作目录");
-    return path;
+    const id = directory === undefined ? project?.serverProjectId : toValue(projectId);
+    const headers: Record<string, string> = id ? { "x-toonflow-project-id": id } : {};
+    return { directory: path, projectId: id, headers };
   }
 
   async function list(path = "", signal?: AbortSignal) {
-    const { data } = await client.get<{ data: { directory: string; empty: boolean; entries: WorkspaceEntry[] } }>("/list", { params: { directory: getDirectory(), path }, signal });
+    const { directory, headers } = getContext();
+    const { data } = await client.get<{ data: { directory: string; empty: boolean; entries: WorkspaceEntry[] } }>("/list", { params: { directory, path }, headers, signal });
     return data.data;
   }
 
   async function read(path: string) {
-    const { data } = await client.get<ArrayBuffer>("/read", { params: { directory: getDirectory(), path }, responseType: "arraybuffer" });
+    const { directory, headers } = getContext();
+    const { data } = await client.get<ArrayBuffer>("/read", { params: { directory, path }, headers, responseType: "arraybuffer" });
     return data;
   }
 
   async function importImage(url: string) {
-    const { data } = await client.post<{ data: { path: string; mimeType: string } }>("/importImage", { directory: getDirectory(), url });
+    const { directory, headers } = getContext();
+    const { data } = await client.post<{ data: { path: string; mimeType: string } }>("/importImage", { directory, url }, { headers });
     return data.data;
   }
 
   function acquireUrl(path: string, mimeType?: string) {
-    const directory = getDirectory();
-    const key = JSON.stringify([directory, path, mimeType]);
+    const { directory, headers, projectId } = getContext();
+    const key = JSON.stringify([directory, projectId, path, mimeType]);
     let entry = fileUrls.get(key);
     if (!entry) {
-      const url = client.get<Blob>("/read", { params: { directory, path }, responseType: "blob" })
+      const url = client.get<Blob>("/read", { params: { directory, path }, headers, responseType: "blob" })
         .then(({ data }) => URL.createObjectURL(mimeType ? new Blob([data], { type: mimeType }) : data));
       entry = { directory, path, url, users: 0 };
       fileUrls.set(key, entry);
@@ -76,11 +82,12 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
   }
 
   async function readText(path: string, maxBytes?: number, signal?: AbortSignal) {
+    const { directory, headers } = getContext();
     if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 1)) throw new Error("读取字节数必须为正整数");
     try {
       const { data } = await client.get<string>("/read", {
-        params: { directory: getDirectory(), path }, responseType: "text", transformResponse: [], signal,
-        headers: maxBytes === undefined ? undefined : { Range: `bytes=0-${maxBytes - 1}` },
+        params: { directory, path }, responseType: "text", transformResponse: [], signal,
+        headers: { ...headers, ...(maxBytes === undefined ? {} : { Range: `bytes=0-${maxBytes - 1}` }) },
       });
       return data;
     } catch (error) {
@@ -96,26 +103,27 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
   }
 
   async function readTextSnapshot(path: string, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<TextSnapshot> {
+    const { directory, headers } = getContext();
     if (options?.maxBytes !== undefined && (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1)) throw new Error("读取字节数必须为正整数");
     const { data } = await client.get<{ data: TextSnapshot }>("/read", {
-      params: { directory: getDirectory(), path, snapshot: true, maxBytes: options?.maxBytes }, signal: options?.signal,
+      params: { directory, path, snapshot: true, maxBytes: options?.maxBytes }, headers, signal: options?.signal,
     });
     return data.data;
   }
 
   async function writeTextSnapshot(path: string, text: string, snapshot: Pick<TextSnapshot, "revision" | "encoding">) {
-    const directory = getDirectory();
+    const { directory, headers } = getContext();
     const { data } = await client.put<{ data: { revision: string } }>("/write", text, {
       params: { directory, path, expectedRevision: snapshot.revision, encoding: snapshot.encoding },
-      headers: { "Content-Type": "application/octet-stream" },
+      headers: { ...headers, "Content-Type": "application/octet-stream" },
     });
     invalidateUrls(directory, path);
     return data.data.revision;
   }
 
   async function write(path: string, content: string | Blob | ArrayBuffer, exclusive = false, signal?: AbortSignal) {
-    const directory = getDirectory();
-    await client.put("/write", content, { params: { directory, path, exclusive }, signal, headers: { "Content-Type": "application/octet-stream" } });
+    const { directory, headers } = getContext();
+    await client.put("/write", content, { params: { directory, path, exclusive }, signal, headers: { ...headers, "Content-Type": "application/octet-stream" } });
     invalidateUrls(directory, path);
   }
 
@@ -124,34 +132,36 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
   }
 
   async function rename(path: string, target: string) {
-    const directory = getDirectory();
-    await client.post("/rename", { directory, path, target });
+    const { directory, headers } = getContext();
+    await client.post("/rename", { directory, path, target }, { headers });
     invalidateUrls(directory, path);
     invalidateUrls(directory, target);
   }
 
   async function copy(path: string, target: string) {
-    const directory = getDirectory();
-    await client.post("/copy", { directory, path, target });
+    const { directory, headers } = getContext();
+    await client.post("/copy", { directory, path, target }, { headers });
     invalidateUrls(directory, target);
   }
 
   async function reveal(path: string) {
     if (isRemoteConnection) throw new Error("远程项目文件无法在本机文件管理器中定位，请下载或导出后查看。");
     if (isMobile) throw new Error("移动端暂不支持在文件管理器中定位项目文件，请使用下载或导出保存文件。");
-    await client.post("/reveal", { directory: getDirectory(), path });
+    const { directory, headers } = getContext();
+    await client.post("/reveal", { directory, path }, { headers });
   }
 
   async function remove(path: string, recursive = false) {
-    const directory = getDirectory();
-    await client.delete("/remove", { data: { directory, path, recursive } });
+    const { directory, headers } = getContext();
+    await client.delete("/remove", { data: { directory, path, recursive }, headers });
     invalidateUrls(directory, path);
   }
 
   async function mkdir(path: string) {
-    await client.post("/mkdir", { directory: getDirectory(), path });
+    const { directory, headers } = getContext();
+    await client.post("/mkdir", { directory, path }, { headers });
   }
 
-  // ACT: 当前目录逐次读取；跨 await 或防抖的操作传入目录字符串，固定本次目标。
+  // ACT: 每次操作同步取得目录和 ID；跨 await 或防抖应传入目录及项目 ID 字符串快照。
   return { list, read, importImage, acquireUrl, readText, readJson, readTextSnapshot, writeTextSnapshot, write, writeJson, rename, copy, reveal, remove, mkdir };
 }

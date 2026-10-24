@@ -123,6 +123,33 @@ export interface GeneratedMedia {
   mediaType: "image" | "video" | "audio";
 }
 
+export interface MediaTaskFilters {
+  mediaType?: "image" | "video" | "audio";
+  status?: MediaTask["status"];
+  reviewState?: "pending" | "approved" | "changesRequested";
+}
+
+export interface MediaTask {
+  id: string;
+  projectId?: string;
+  mediaType: "image" | "video" | "audio";
+  providerId: string;
+  modelId: string;
+  status: "queued" | "running" | "saving" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted";
+  billingState: "notSubmitted" | "providerManaged" | "unknown";
+  createdAt: number;
+  updatedAt: number;
+  files: GeneratedMedia[];
+  error?: string;
+  review?: {
+    revision: number;
+    decision: "approved" | "changesRequested";
+    comment: string;
+    reviewedAt: number;
+    reviewer: { id: string; username: string } | null;
+  };
+}
+
 export interface MediaContext {
   listModels(): Promise<MediaModel[]>;
   generateImage(request: MediaGenerationRequest, signal?: AbortSignal): Promise<GeneratedMedia[]>;
