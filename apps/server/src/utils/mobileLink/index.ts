@@ -134,6 +134,7 @@ async function listen(app: Application, port: number) {
 }
 
 export async function startMobileLinkRuntime(app: Application) {
+  if (app.locals.authRequired) return;
   const runtime = getRuntime(app);
   runtime.supported = true;
   const config = getMobileLinkConfig();

@@ -6,6 +6,7 @@ import type { RemoteTeam } from "@/utils/teams";
 import type { A2aSettings } from "@/agent/a2a/settings";
 import type { desktopUpdateAttempt } from "@/types/desktop";
 import type { MobileLinkConfig } from "@/utils/mobileLink";
+import type { UserData } from "@/utils/user/types";
 import { normalizeNodeMenu, serializeNodeMenu } from "@/lib/nodeMenu";
 
 const autoInstallProviders = [tfRouter];
@@ -14,7 +15,7 @@ mkdirSync(dataDirectory, { recursive: true });
 const configDirectory = realpathSync(dataDirectory);
 process.env.TOONFLOW_DATA_DIR = configDirectory;
 
-const config = new conf<{ settings: Record<string, unknown>; disabledSkills: string[]; toolConfigs: Record<string, Record<string, unknown>>; nodeConfigs: Record<string, Record<string, unknown>>; extConfigs: Record<string, Record<string, unknown>>; remoteConnections: Record<string, RemoteTeam>; a2a: A2aSettings; desktopUpdateAttempt: desktopUpdateAttempt; mobileLink: MobileLinkConfig }>({
+const config = new conf<{ settings: Record<string, unknown>; disabledSkills: string[]; toolConfigs: Record<string, Record<string, unknown>>; nodeConfigs: Record<string, Record<string, unknown>>; extConfigs: Record<string, Record<string, unknown>>; remoteConnections: Record<string, RemoteTeam>; a2a: A2aSettings; desktopUpdateAttempt: desktopUpdateAttempt; mobileLink: MobileLinkConfig; userData: UserData; userPasswords: Record<string, { salt: string; hash: string }> }>({
   cwd: configDirectory,
   configName: "settings",
   configFileMode: 0o600,

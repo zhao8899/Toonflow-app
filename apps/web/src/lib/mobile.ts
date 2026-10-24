@@ -2,6 +2,7 @@ import { computed, ref } from "vue";
 import axios from "axios";
 import { t, translate } from "@toonflow/i18n/vue";
 import { isMobile, isDesktop, isRemoteConnection } from "./platform";
+import { authRequired } from "./auth";
 
 type MobileConnection = { mode: "local" | "remote"; name?: string; url?: string; online?: boolean | null; appVersion?: string; remoteAppVersion?: string };
 
@@ -25,6 +26,7 @@ let connectionRequest: Promise<MobileConnection> | undefined;
 let connectionTimer: ReturnType<typeof setTimeout> | undefined;
 
 export async function refreshMobileConnection() {
+  if (authRequired.value) return mobileConnection.value;
   if (connectionRequest) return connectionRequest;
   clearTimeout(connectionTimer);
   connectionRequest = (async () => {

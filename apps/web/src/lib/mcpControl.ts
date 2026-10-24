@@ -5,6 +5,7 @@ import type { NodeToolInfo } from "@toonflow/tools-scaffold/runtime";
 import { invalidateNodeModels } from "@toonflow/nodes-scaffold/nodeAi";
 import { saveSettings, settings } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { authRequired } from "@/lib/auth";
 
 type ControlCall = { type: "call"; callId: string; name: string; args: Record<string, unknown>; directory?: string };
 type WorkspaceControl = {
@@ -41,6 +42,7 @@ export function waitForControlValue<T>(read: WatchSource<T | undefined>, signal:
 }
 
 export function useMcpControl() {
+  if (authRequired.value) return;
   const router = useRouter();
   const workspaceStore = useWorkspaceStore();
   const calls = new Map<string, AbortController>();
