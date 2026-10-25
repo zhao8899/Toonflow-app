@@ -3,6 +3,7 @@ import { ElButton, ElResult } from "element-plus";
 import { createPinia } from "pinia";
 import { createPersistedState } from "pinia-plugin-persistedstate";
 import App from "./App.vue";
+import "element-plus/theme-chalk/dark/css-vars.css";
 import "@/assets/main.scss";
 import "element-plus/es/components/message-box/style/css";
 import "element-plus/es/components/button/style/css";

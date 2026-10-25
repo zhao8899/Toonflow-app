@@ -47,14 +47,15 @@ async function login() {
 </script>
 
 <style scoped lang="scss">
+// ACT: 登录页在应用与 Element 深色变量加载前挂载，色值与 main.scss 的深色基调保持一致，不依赖主题切换。
 .loginPage {
   min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 24px;
   box-sizing: border-box;
-  background: #f5f7fb;
-  color: #1e293b;
+  background: radial-gradient(ellipse at 50% 0%, color-mix(in srgb, #409eff 18%, transparent), transparent 60%), #0b0b0f;
+  color: #e5e7eb;
 
   .loginForm {
     width: min(100%, 360px);
@@ -62,19 +63,25 @@ async function login() {
     flex-direction: column;
     gap: 12px;
     padding: 28px;
-    border: 1px solid #dce3ed;
+    border: 1px solid #2c2c36;
     border-radius: 16px;
-    background: white;
+    background: #18181f;
 
-    h1 { font-size: 24px; margin: 0; }
-    p { margin: 0 0 12px; color: #475569; }
+    h1 {
+      font-size: 24px;
+      margin: 0;
+      background: linear-gradient(90deg, #409eff, color-mix(in srgb, #409eff 40%, #a855f7));
+      background-clip: text;
+      color: transparent;
+    }
+    p { margin: 0 0 12px; color: #a1a1aa; }
     label { font-size: 14px; }
     input, button { box-sizing: border-box; padding: 12px; border-radius: 8px; font: inherit; }
-    input { min-width: 0; border: 1px solid #94a3b8; background: white; color: #1e293b; }
-    button { margin-top: 12px; border: 0; background: #2563eb; color: white; cursor: pointer; }
+    input { min-width: 0; border: 1px solid #363641; background: #111116; color: #e5e7eb; }
+    button { margin-top: 12px; border: 0; background: #409eff; color: white; cursor: pointer; }
     button:disabled { opacity: 0.6; cursor: wait; }
     input:focus-visible, button:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
-    .loginError { color: #b91c1c; overflow-wrap: anywhere; }
+    .loginError { color: #f87171; overflow-wrap: anywhere; }
   }
 }
 </style>

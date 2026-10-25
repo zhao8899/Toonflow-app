@@ -59,7 +59,6 @@ import { desktopUpdateSnapshot, stopDesktopUpdateObservation } from "@/stores/de
 import { useMcpControl } from "@/lib/mcpControl";
 import ffmpegRequired from "@/components/settings/ffmpegRequired.vue";
 import updateBox from "@/components/updateBox.vue";
-import "element-plus/theme-chalk/dark/css-vars.css";
 
 useMcpControl();
 

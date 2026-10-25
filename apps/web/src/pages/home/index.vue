@@ -632,7 +632,7 @@ async function createProject(fromPrompt = true) {
           font-size: clamp(32px, 5vw, 48px);
           font-weight: 700;
           letter-spacing: -1px;
-          background: linear-gradient(90deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 40%, #a855f7));
+          background: var(--ui-accent-gradient);
           background-clip: text;
           color: transparent;
         }

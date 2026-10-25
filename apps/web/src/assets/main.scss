@@ -34,6 +34,23 @@ html:root {
 
   .el-dialog { --el-dialog-border-radius: var(--ui-radius-large); }
   .el-tag { --el-tag-border-radius: var(--ui-radius-small); }
+
+  // 全站强调色：首页标题、快捷标签等渐变统一引用，避免各页面各写一套色值。
+  --ui-accent: color-mix(in srgb, var(--el-color-primary) 40%, #a855f7);
+  --ui-accent-gradient: linear-gradient(90deg, var(--el-color-primary), var(--ui-accent));
+}
+
+// 参考 LibTV 的深色基调：更深的底色与更低对比的分隔线，组件仍只读 Element 变量，不改变交互。
+html.dark:root {
+  --el-bg-color-page: #0b0b0f;
+  --el-bg-color: #111116;
+  --el-bg-color-overlay: #18181f;
+  --el-fill-color-blank: #111116;
+  --el-fill-color-light: #1c1c24;
+  --el-fill-color: #22222b;
+  --el-border-color-lighter: #24242d;
+  --el-border-color-light: #2c2c36;
+  --el-border-color: #363641;
 }
 
 html,

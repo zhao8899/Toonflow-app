@@ -90,7 +90,7 @@ watch([offset, refresh], async (_value, _previous, onCleanup) => {
     justify-content: space-between;
     gap: 12px;
     flex-wrap: wrap;
-    h1 { margin: 0; font-size: 22px; }
+    h1 { margin: 0; font-size: 22px; background: var(--ui-accent-gradient); background-clip: text; color: transparent; }
   }
   .portalNote { color: var(--el-text-color-secondary); line-height: 1.6; }
   .portalToolbar, .portalPagination, .projectItem { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
