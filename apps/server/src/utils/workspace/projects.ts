@@ -9,7 +9,10 @@ import { resolveWorkspace } from "@/utils/workspace";
 const projectSchema = z.object({
   id: z.uuid(), name: z.string().min(1).max(100), directory: z.string().min(1),
   createdAt: z.string(), createdBy: z.string().min(1),
+  // 旧登记记录没有成员字段，读取时视为无成员。
+  members: z.array(z.string()).default([]),
 });
+type Project = z.infer<typeof projectSchema>;
 const registryPath = () => resolve(dirname(conf.path), "projects.json");
 
 function readProjects() {
@@ -44,10 +47,18 @@ export async function getProject(req: Request, id: string) {
   return { ...project, directory };
 }
 
-export async function resolveRequestProject(req: Request) {
+/** 非成员与不存在同样返回 404，避免借此探测项目 ID；成员视图不返回成员名单。 */
+export async function getMemberProject(req: Request, id: string, userId: string, role: string) {
+  const project = readProjects().find(project => project.id === id.toLowerCase());
+  if (!project || !canAccessProject(project, userId, role)) throw Object.assign(new Error("项目不存在"), { status: 404 });
+  const resolved = await getProject(req, id);
+  return role === "admin" ? resolved : { ...resolved, members: [] };
+}
+
+export async function resolveRequestProject(req: Request, userId: string, role: string) {
   const parsed = z.uuid().safeParse(req.get("x-toonflow-project-id"));
   if (!parsed.success) throw Object.assign(new Error("项目 ID 格式无效"), { status: 400 });
-  const project = await getProject(req, parsed.data);
+  const project = await getMemberProject(req, parsed.data, userId, role);
   const requestedDirectory = ["GET", "HEAD"].includes(req.method) || req.is("application/octet-stream")
     ? req.query.directory : req.body?.directory;
   if (typeof requestedDirectory !== "string" || !isAbsolute(requestedDirectory)) {
@@ -71,14 +82,38 @@ export function registerProject(directory: string, name: string, createdBy: stri
   if (projects.some(project => contains(project.directory, directory) || contains(directory, project.directory))) {
     throw Object.assign(new Error("项目目录不能与已登记项目相互包含"), { status: 409 });
   }
-  const project = { id: randomUUID(), name, directory, createdAt: new Date().toISOString(), createdBy };
-  writeAtomicSync(registryPath(), `${JSON.stringify([project, ...projects], null, 2)}\n`, { mode: 0o600 });
+  const project: Project = { id: randomUUID(), name, directory, createdAt: new Date().toISOString(), createdBy, members: [] };
+  saveProjects([project, ...projects]);
   return project;
 }
 
-export function listProjects(offset: number, limit: number) {
+function saveProjects(projects: Project[]) {
+  writeAtomicSync(registryPath(), `${JSON.stringify(projects, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** 管理员可见完整记录；成员只能看到自己加入的项目，且不返回成员名单。 */
+export function listProjects(offset: number, limit: number, memberId?: string) {
+  const projects = memberId ? readProjects().filter(project => project.members.includes(memberId)) : readProjects();
+  return {
+    total: projects.length,
+    projects: projects.slice(offset, offset + limit).map(project => memberId ? { ...project, members: [] } : project),
+  };
+}
+
+export function canAccessProject(project: Project, userId: string, role: string) {
+  return role === "admin" || project.members.includes(userId);
+}
+
+/** 完整覆盖项目成员名单；成员须为现有普通账号，管理员本身已可访问全部项目。 */
+export function setProjectMembers(id: string, members: string[], isMember: (userId: string) => boolean) {
   const projects = readProjects();
-  return { total: projects.length, projects: projects.slice(offset, offset + limit) };
+  const project = projects.find(project => project.id === id.toLowerCase());
+  if (!project) throw Object.assign(new Error("项目不存在"), { status: 404 });
+  const unique = [...new Set(members)];
+  if (unique.some(userId => !isMember(userId))) throw Object.assign(new Error("成员必须是现有普通账号"), { status: 400 });
+  project.members = unique;
+  saveProjects(projects);
+  return project;
 }
 
 export function findProjectId(directory: string) {

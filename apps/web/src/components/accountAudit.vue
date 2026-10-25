@@ -30,7 +30,7 @@ import { onBeforeUnmount, ref, watch } from "vue";
 interface AuditEvent {
   id: string;
   createdAt: string;
-  action: "administratorCreated" | "statusChanged" | "passwordChanged" | "sessionsRevoked";
+  action: "administratorCreated" | "memberCreated" | "statusChanged" | "passwordChanged" | "sessionsRevoked";
   actor: { id: string; username: string } | null;
   target: { id: string; username: string };
   previousStatus?: "active" | "disabled" | "pending";
@@ -44,7 +44,7 @@ const offset = ref(0);
 const pageSize = 30;
 const loading = ref(false);
 const failure = ref("");
-const actionLabels = { administratorCreated: "创建管理员", statusChanged: "变更账号状态", passwordChanged: "修改密码", sessionsRevoked: "撤销全部会话" };
+const actionLabels = { administratorCreated: "创建管理员", memberCreated: "创建成员", statusChanged: "变更账号状态", passwordChanged: "修改密码", sessionsRevoked: "撤销全部会话" };
 const statusLabels = { active: "可用", disabled: "已停用", pending: "待审核" };
 let request: AbortController | undefined;
 

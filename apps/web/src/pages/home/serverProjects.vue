@@ -20,7 +20,9 @@
         <strong>{{ project.name }}</strong>
         <p>{{ project.directory }}</p>
         <p>项目 ID：{{ project.id }}</p>
+        <p>成员：{{ project.members.length ? project.members.map(memberName).join("、") : "暂无" }}</p>
         <el-button :disabled="saving || disabled" @click="open(project)">打开项目</el-button>
+        <el-button :disabled="saving" @click="editMembers(project)">编辑成员</el-button>
       </article>
       <div class="projectPagination">
         <el-button :disabled="offset === 0 || loading || saving" @click="offset -= 30">上一页</el-button>
@@ -29,6 +31,17 @@
       </div>
     </div>
   </el-dialog>
+  <el-dialog v-model="membersVisible" title="编辑项目成员" width="min(480px, 92vw)" appendToBody :closeOnClickModal="!saving" :closeOnPressEscape="!saving" :showClose="!saving">
+    <p>成员可查看本项目的生成任务、下载结果并提交审片意见。保存后完整替换原名单；管理员无需加入即可访问全部项目。</p>
+    <el-select v-model="selectedMembers" multiple filterable :disabled="saving" placeholder="选择成员账号" aria-label="项目成员" style="width: 100%">
+      <el-option v-for="account in memberAccounts" :key="account.id" :label="account.status === 'active' ? account.username : `${account.username}（已停用）`" :value="account.id" />
+    </el-select>
+    <p v-if="membersError" role="alert">{{ membersError }}</p>
+    <template #footer>
+      <el-button :disabled="saving" @click="membersVisible = false">取消</el-button>
+      <el-button type="primary" :loading="saving" @click="saveMembers">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -36,7 +49,8 @@ import { ref, watch } from "vue";
 import axios from "axios";
 import workspacePicker from "./workspacePicker.vue";
 
-type ServerProject = { id: string; name: string; directory: string; createdAt: string; createdBy: string };
+type ServerProject = { id: string; name: string; directory: string; createdAt: string; createdBy: string; members: string[] };
+type Account = { id: string; username: string; role: "admin" | "user"; status: string };
 defineProps<{ disabled?: boolean }>();
 const emit = defineEmits<{ open: [id: string] }>();
 const visible = ref(false);
@@ -73,7 +87,50 @@ async function register() {
   finally { saving.value = false; }
 }
 
-watch(visible, () => { offset.value = 0; errorMessage.value = ""; });
+const membersVisible = ref(false);
+const membersError = ref("");
+const selectedMembers = ref<string[]>([]);
+const memberAccounts = ref<Account[]>([]);
+let membersTarget = "";
+
+function memberName(id: string) {
+  return memberAccounts.value.find(account => account.id === id)?.username ?? id;
+}
+
+async function loadAccounts() {
+  // ACT: 账号列表单页最多 100 条，满足当前小团队规模；超过后需改为远程搜索。
+  const response = await fetch("/api/users/list?offset=0&limit=100", { cache: "no-store" });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.message || "账号列表读取失败");
+  memberAccounts.value = (body.data.users as Account[]).filter(account => account.role === "user");
+}
+
+async function editMembers(project: ServerProject) {
+  membersTarget = project.id;
+  selectedMembers.value = [...project.members];
+  membersError.value = "";
+  membersVisible.value = true;
+  try { await loadAccounts(); }
+  catch (error) { membersError.value = message(error); }
+}
+
+async function saveMembers() {
+  if (saving.value) return;
+  saving.value = true;
+  membersError.value = "";
+  try {
+    const { data } = await axios.put("/api/projects/members", { id: membersTarget, members: selectedMembers.value }, { headers, timeout: 15000 });
+    if (data.code !== 200) throw new Error(data.message);
+    membersVisible.value = false;
+    refresh.value++;
+  } catch (error) { membersError.value = message(error); }
+  finally { saving.value = false; }
+}
+
+watch(visible, () => {
+  offset.value = 0; errorMessage.value = "";
+  if (visible.value) void loadAccounts().catch(() => {});
+});
 watch([visible, offset, refresh], async (_value, _previous, onCleanup) => {
   const controller = new AbortController();
   onCleanup(() => controller.abort());

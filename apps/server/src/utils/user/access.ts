@@ -44,10 +44,34 @@ export function requireAccess(req: Request, res: Response, next: NextFunction) {
   }
   return requireAuth(req, res, (cause?: unknown) => {
     if (cause) return next(cause);
-    if (res.locals.userRole !== "admin") return res.status(403).json(error("当前工作台仅允许管理员访问", null, 403));
+    if (res.locals.userRole === "admin") return next();
+    // 成员默认拒绝：只开放会话、项目入口及项目内文件与审片接口；项目接口须携带项目 ID，由项目上下文中间件核对成员身份。
+    const path = req.path.toLowerCase().replace(/\/+$/, "");
+    const scope = memberRoutes.find(route => route.path === path && route.methods.includes(req.method));
+    if (!scope) return res.status(403).json(error("成员账号无权访问此功能", null, 403));
+    if (scope.project && req.get("x-toonflow-project-id") === undefined) return res.status(403).json(error("成员访问项目内容必须指定项目", null, 403));
     next();
   });
 }
+
+const memberRoutes = [
+  { path: "/auth/session", methods: ["GET", "HEAD"], project: false },
+  { path: "/auth/changepassword", methods: ["POST"], project: false },
+  { path: "/auth/revokesessions", methods: ["POST"], project: false },
+  { path: "/projects/list", methods: ["GET", "HEAD"], project: false },
+  { path: "/projects/get", methods: ["GET", "HEAD"], project: false },
+  { path: "/workspaces/files/list", methods: ["GET", "HEAD"], project: true },
+  { path: "/workspaces/files/read", methods: ["GET", "HEAD"], project: true },
+  { path: "/workspaces/files/write", methods: ["PUT"], project: true },
+  { path: "/workspaces/files/mkdir", methods: ["POST"], project: true },
+  { path: "/workspaces/files/rename", methods: ["POST"], project: true },
+  { path: "/workspaces/files/copy", methods: ["POST"], project: true },
+  { path: "/workspaces/files/remove", methods: ["DELETE"], project: true },
+  { path: "/ai/media/tasks/list", methods: ["GET", "HEAD"], project: true },
+  { path: "/ai/media/tasks/get", methods: ["GET", "HEAD"], project: true },
+  { path: "/ai/media/tasks/reviewhistory", methods: ["GET", "HEAD"], project: true },
+  { path: "/ai/media/tasks/review", methods: ["PUT"], project: true },
+];
 
 const loginAttempts = new Map<string, { count: number; expiresAt: number }>();
 let loginWindow = { count: 0, expiresAt: 0 };

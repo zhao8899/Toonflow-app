@@ -9,7 +9,7 @@ import buildRoute from "@/core";
 import { error, errorFromCause } from "@/lib/responseFormat";
 import desktopRequest from "@/lib/desktop";
 import { getRuntimePlatform } from "@/lib/platform";
-import { requireAdministrator } from "@/lib/middleware";
+import { requireAuth } from "@/lib/middleware";
 import initializePlugins from "@/utils/plugins/initialize";
 import { languageRequest, resolveRequestLocale, runWithLocale, setLocaleFallback, translateError, translateMessage } from "@/lib/i18n";
 import { detectLocale, normalizeLocale } from "@toonflow/i18n";
@@ -96,9 +96,11 @@ export async function createApp({
   const { resolveRequestProject } = await import("@/utils/workspace/projects");
   app.use(["/api/ai/media/tasks", "/api/workspaces/files"], (req, res, next) => {
     if (req.get("x-toonflow-project-id") === undefined) return next();
-    return requireAdministrator(req, res, next);
+    return requireAuth(req, res, next);
   }, async (req, res, next) => {
-    if (req.get("x-toonflow-project-id") !== undefined) res.locals.project = await resolveRequestProject(req);
+    if (req.get("x-toonflow-project-id") !== undefined) {
+      res.locals.project = await resolveRequestProject(req, res.locals.userId, res.locals.userRole);
+    }
     next();
   });
   app.use("/api/desktop", desktopRequest);

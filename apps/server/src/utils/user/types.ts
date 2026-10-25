@@ -56,7 +56,7 @@ export interface ProviderConfig {
 export interface UserAuditEvent {
   id: string;
   createdAt: string;
-  action: "administratorCreated" | "statusChanged" | "passwordChanged" | "sessionsRevoked";
+  action: "administratorCreated" | "memberCreated" | "statusChanged" | "passwordChanged" | "sessionsRevoked";
   actor: { id: string; username: string } | null;
   target: { id: string; username: string };
   previousStatus?: UserStatus;

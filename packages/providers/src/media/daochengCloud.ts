@@ -39,10 +39,14 @@ function messageText(content: unknown): string {
   return content ? JSON.stringify(content) : "";
 }
 
-/** 优先取带视频扩展名的链接，否则取第一个 HTTP(S) 链接。 */
+/** 只接受带视频扩展名的 HTTPS 链接，不回退到任意链接，避免回复文本诱导下载内网地址。 */
 function findVideoUrl(text: string) {
-  const urls = text.match(/https?:\/\/[^\s"'<>()[\]]+/g) ?? [];
-  return urls.find((url) => /\.(mp4|mov|webm|m3u8)(\?|$)/i.test(url)) ?? urls[0];
+  for (const match of text.match(/https:\/\/[^\s"'<>()[\]]+/g) ?? []) {
+    try {
+      const url = new URL(match);
+      if (/\.(mp4|mov|webm|m3u8)$/i.test(url.pathname)) return url.href;
+    } catch {}
+  }
 }
 
 export default {

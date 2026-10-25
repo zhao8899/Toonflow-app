@@ -2,13 +2,17 @@
   <el-drawer v-model="visible" title="账号管理" size="min(640px, 100vw)" appendToBody :closeOnClickModal="!saving" :closeOnPressEscape="!saving" :showClose="!saving" @closed="clearForm">
     <div class="accountManagement">
       <form class="accountForm" @submit.prevent="createAccount">
-        <h3>新增管理员</h3>
-        <p>管理员可以访问本实例的全部设置、插件、Agent 和授权工作区。请仅为可信人员创建账号。</p>
+        <h3>新增账号</h3>
+        <p>管理员可以访问本实例的全部设置、插件、Agent 和授权工作区，请仅为可信人员创建。成员只能查看被加入项目的生成任务并提交审片意见。</p>
+        <el-radio-group v-model="role" :disabled="saving" aria-label="账号角色">
+          <el-radio-button value="user">成员</el-radio-button>
+          <el-radio-button value="admin">管理员</el-radio-button>
+        </el-radio-group>
         <label :for="`${formId}Username`">用户名（3～20 个字符）</label>
         <el-input :id="`${formId}Username`" v-model="username" autocomplete="off" :maxlength="20" :disabled="saving" />
         <label :for="`${formId}Password`">初始密码（至少 12 个字符）</label>
         <el-input :id="`${formId}Password`" v-model="password" type="password" autocomplete="new-password" :maxlength="1024" :disabled="saving" showPassword />
-        <el-button type="primary" nativeType="submit" :loading="saving">创建管理员</el-button>
+        <el-button type="primary" nativeType="submit" :loading="saving">{{ role === 'admin' ? '创建管理员' : '创建成员' }}</el-button>
       </form>
       <p v-if="actionError" class="accountError" role="alert">{{ actionError }}</p>
       <div class="accountToolbar">
@@ -25,7 +29,7 @@
         </div>
         <el-button :type="account.status === 'active' ? 'danger' : 'primary'" :disabled="saving || loading" @click="setStatus(account)">{{ account.status === 'active' ? '停用' : '恢复' }}</el-button>
       </article>
-      <p class="accountNote">普通用户暂不能进入管理员工作台；停用会撤销旧会话，恢复后需要重新登录。已开始的后台任务不会自动取消。</p>
+      <p class="accountNote">成员需在“服务器项目”中加入项目后才能访问；停用会撤销旧会话，恢复后需要重新登录。已开始的后台任务不会自动取消。</p>
       <div class="accountPagination">
         <el-button :disabled="!offset || saving || loading" @click="offset -= pageSize">上一页</el-button>
         <span>{{ Math.floor(offset / pageSize) + 1 }} / {{ Math.max(1, Math.ceil(total / pageSize)) }}</span>
@@ -54,6 +58,7 @@ const auditVisible = ref(false);
 const formId = useId();
 const username = ref("");
 const password = ref("");
+const role = ref<"admin" | "user">("user");
 const saving = ref(false);
 const loading = ref(false);
 const loadError = ref("");
@@ -105,12 +110,12 @@ async function createAccount() {
   try {
     const response = await fetch("/api/users/create", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: username.value, password: password.value }),
+      body: JSON.stringify({ username: username.value, password: password.value, role: role.value }),
     });
     const body = await response.json();
     if (!response.ok) throw new Error(body.message || "创建失败");
     clearForm();
-    ElMessage.success("管理员账号已创建");
+    ElMessage.success(role.value === "admin" ? "管理员账号已创建" : "成员账号已创建");
     if (offset.value) offset.value = 0;
     else await load();
   } catch (cause) {

@@ -1,6 +1,8 @@
 <template>
-  <el-button v-if="authRequired" text :disabled="pending" @click="accountsVisible = true">账号管理</el-button>
-  <accountManagement v-model="accountsVisible" />
+  <template v-if="authRequired && userRole === 'admin'">
+    <el-button text :disabled="pending" @click="accountsVisible = true">账号管理</el-button>
+    <accountManagement v-model="accountsVisible" />
+  </template>
   <el-button v-if="authRequired" text :disabled="pending" @click="passwordVisible = true">修改密码</el-button>
   <el-button v-if="authRequired" text :loading="pending" @click="logout">退出登录</el-button>
   <el-dialog v-model="passwordVisible" title="修改密码" width="min(440px, 92vw)" appendToBody :closeOnClickModal="!changingPassword" :closeOnPressEscape="!changingPassword" :showClose="!changingPassword" @closed="clearPasswords">
@@ -24,7 +26,7 @@
 <script setup lang="ts">
 import { ref, useId } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { authRequired } from "@/lib/auth";
+import { authRequired, userRole } from "@/lib/auth";
 import accountManagement from "@/components/accountManagement.vue";
 
 const pending = ref(false);

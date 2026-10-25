@@ -87,6 +87,7 @@ import type { GeneratedMedia, MediaTask, MediaTaskFilters } from "@toonflow/tool
 import { useWorkspaceStore } from "@/stores/workspace";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import saveFile from "@/lib/saveFile";
+import { userRole } from "@/lib/auth";
 import mediaReviewHistory from "./mediaReviewHistory.vue";
 
 const visible = defineModel<boolean>({ default: false });
@@ -164,7 +165,8 @@ async function load() {
 }
 
 function canCancel(task: MediaTask) {
-  return ["queued", "running", "saving"].includes(task.status);
+  // 成员不能取消任务，服务端同样拒绝；这里只隐藏入口。
+  return userRole.value === "admin" && ["queued", "running", "saving"].includes(task.status);
 }
 
 function openReview(task: MediaTask) {

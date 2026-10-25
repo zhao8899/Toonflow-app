@@ -16,10 +16,8 @@ router.post("/", (req, res, next) => {
   try {
     const { username, password } = req.body;
 
+    // 成员账号可登录，访问范围由 requireAccess 的默认拒绝名单与项目成员关系限制。
     const user = u.userManager.login(username, password);
-    if (req.app.locals.authRequired && user.role !== "admin") {
-      return res.status(403).json(error("当前工作台仅允许管理员访问", null, 403));
-    }
 
     const token = u.jwt.generateToken({
       userId: user.id,

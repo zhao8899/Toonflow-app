@@ -101,7 +101,9 @@ class UserManager {
       salt: salt.toString("hex"),
       hash: hash.toString("hex"),
     };
+    // 公开注册不记录；管理员创建成员时记录操作者。
     if (role === UserRole.admin) this.recordAudit(userData, "administratorCreated", user, actorId);
+    else if (actorId) this.recordAudit(userData, "memberCreated", user, actorId);
     // ACT: conf 的对象形式一次保存整个快照，避免用户与密码分次落盘。
     conf.set({ userData, userPasswords: passwordData });
 
