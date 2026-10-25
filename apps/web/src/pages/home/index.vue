@@ -1,13 +1,35 @@
 <template>
-  <el-container class="home">
+  <div class="home">
     <bg class="pageBackground" />
+    <aside class="sideNav" aria-label="侧边导航">
+      <div class="sideBrand">
+        <el-image class="brandLogo" :src="logoUrl" fit="contain" alt="" />
+        <span>Toonflow</span>
+      </div>
+      <nav class="sideLinks">
+        <button type="button" class="sideLink" :class="{ active: activeSection === 'create' }" :aria-current="activeSection === 'create' ? 'page' : undefined" @click="scrollToSection('create')">
+          <icon-home :size="18" aria-hidden="true" />首页
+        </button>
+        <button type="button" class="sideLink" :class="{ active: activeSection === 'projects' }" :aria-current="activeSection === 'projects' ? 'page' : undefined" @click="scrollToSection('projects')">
+          <icon-folders :size="18" aria-hidden="true" />项目
+        </button>
+      </nav>
+      <div class="sideFooter">
+        <el-badge isDot :hidden="!hasDesktopUpdate">
+          <el-button class="sideButton" :icon="IconSettings" :aria-label="hasDesktopUpdate ? '设置，有新版本可用' : '设置'" @click="settingsVisible = true">设置</el-button>
+        </el-badge>
+        <el-button v-if="!authRequired" class="sideButton" :type="deviceHubEnabled ? 'success' : undefined" :plain="deviceHubEnabled" :icon="deviceHubEnabled || mobileConnection.mode === 'remote' ? IconDeviceDesktop : IconQrcode" @click="mobileConnectVisible = true">{{ mobileConnectionLabel }}</el-button>
+      </div>
+    </aside>
+    <el-container class="mainArea">
     <el-header class="pageHeader">
       <div class="headerActions">
         <sessionMenu />
-        <el-badge isDot :hidden="!hasDesktopUpdate">
-          <el-button round size="large" :icon="IconSettings" :aria-label="hasDesktopUpdate ? '设置，有新版本可用' : '设置'" @click="settingsVisible = true">设置</el-button>
+        <!-- 窄屏隐藏侧边栏时，设置入口回到顶部 -->
+        <el-badge class="compactAction" isDot :hidden="!hasDesktopUpdate">
+          <el-button circle :icon="IconSettings" :aria-label="hasDesktopUpdate ? '设置，有新版本可用' : '设置'" @click="settingsVisible = true" />
         </el-badge>
-        <el-button v-if="!authRequired" round size="large" :type="deviceHubEnabled ? 'success' : undefined" :plain="deviceHubEnabled" :icon="deviceHubEnabled || mobileConnection.mode === 'remote' ? IconDeviceDesktop : IconQrcode" @click="mobileConnectVisible = true">{{ mobileConnectionLabel }}</el-button>
+        <el-button v-if="!authRequired" class="compactAction" circle :icon="deviceHubEnabled || mobileConnection.mode === 'remote' ? IconDeviceDesktop : IconQrcode" :aria-label="mobileConnectionLabel" @click="mobileConnectVisible = true" />
       </div>
       <div class="githubAction">
         <span class="arrowHint starHint">
@@ -20,10 +42,10 @@
       </div>
     </el-header>
     <el-main class="pageContent">
-      <section class="creationPanel" aria-label="创建项目">
-        <div class="brand">
-          <el-image class="brandLogo" :src="logoUrl" fit="contain" alt="Toonflow" />
+      <section ref="createSection" class="creationPanel" aria-label="创建项目">
+        <div class="hero">
           <h1>Toonflow</h1>
+          <p>AI 短剧、漫剧与视频创作</p>
         </div>
         <div class="promptArea">
           <span class="arrowHint inspirationHint">
@@ -55,9 +77,14 @@
               <p v-if="!workspaceDirectory" class="workspaceHint" role="status">请先选择一个空文件夹作为工作目录，画布和素材会保存在这里。</p>
             </template>
           </el-card>
+          <div class="quickTools" role="group" aria-label="快捷创作">
+            <button v-for="tool in quickTools" :key="tool.label" type="button" class="quickTool" :disabled="creating || opening" @click="useQuickTool(tool.prompt)">
+              <component :is="tool.icon" :size="16" aria-hidden="true" />{{ tool.label }}
+            </button>
+          </div>
         </div>
       </section>
-      <section class="projectList" aria-labelledby="projectListTitle">
+      <section ref="projectsSection" class="projectList" aria-labelledby="projectListTitle">
         <div class="sectionHeader">
           <h2 id="projectListTitle">项目列表</h2>
           <el-space wrap>
@@ -89,10 +116,11 @@
         </div>
       </section>
     </el-main>
+    </el-container>
     <settings v-model="settingsVisible" />
     <mobileConnect v-model="mobileConnectVisible" />
     <workspacePicker ref="relocationPicker" hideTrigger />
-  </el-container>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -109,6 +137,7 @@ import {
   IconList, IconSortDescending,
   IconSortAscending, IconFolder, IconEdit,
   IconFolderMinus, IconFolderPlus, IconFolderOpen, IconPaperclip,
+  IconHome, IconFolders, IconMovie, IconPhoto, IconMusic, IconScript,
 } from "@tabler/icons-vue";
 import modelPopover from "@/components/modelPopover.vue";
 import attachmentList from "@/components/agent/attachmentList.vue";
@@ -206,6 +235,31 @@ onUnmounted(() => {
 watch([creating, opening], ([creating, opening]) => {
   if (creating || opening) clearAttachmentDrag();
 }, { flush: "sync" });
+
+const createSection = ref<HTMLElement>();
+const projectsSection = ref<HTMLElement>();
+const activeSection = ref<"create" | "projects">("create");
+const quickTools = [
+  { label: "视频生成", icon: IconMovie, prompt: "生成一段视频：" },
+  { label: "图片生成", icon: IconPhoto, prompt: "生成一张图片：" },
+  { label: "音频生成", icon: IconMusic, prompt: "生成一段音频：" },
+  { label: "剧本生成", icon: IconScript, prompt: "根据以下故事创作剧本：" },
+];
+
+function scrollToSection(section: "create" | "projects") {
+  activeSection.value = section;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  (section === "create" ? createSection : projectsSection).value?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+}
+
+// 快捷标签只在输入框开头补充任务说明，保留已输入内容，仍由用户确认后发送。
+async function useQuickTool(text: string) {
+  const starter = translate(text);
+  if (!prompt.value.startsWith(starter)) prompt.value = `${starter}${prompt.value}`;
+  await nextTick();
+  promptInput.value?.focus();
+  promptInput.value?.textarea?.setSelectionRange(prompt.value.length, prompt.value.length);
+}
 
 const selectedModel = ref("");
 const reasoningEffort = ref("");
@@ -402,6 +456,7 @@ async function createProject(fromPrompt = true) {
 .home {
   position: relative;
   isolation: isolate;
+  display: flex;
   min-height: 100dvh;
   color: var(--el-text-color-primary);
 
@@ -410,6 +465,88 @@ async function createProject(fromPrompt = true) {
     inset: 0;
     z-index: -1;
     pointer-events: none;
+  }
+
+  .sideNav {
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    gap: 24px;
+    width: 200px;
+    height: 100dvh;
+    padding: 20px 12px;
+    border-inline-end: 1px solid var(--el-border-color-lighter);
+    background: color-mix(in srgb, var(--el-bg-color) 80%, transparent);
+    backdrop-filter: blur(12px);
+
+    .sideBrand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 8px;
+      font-size: 18px;
+      font-weight: 600;
+
+      .brandLogo {
+        width: 28px;
+        height: 28px;
+
+        .dark & { filter: invert(1); }
+      }
+    }
+
+    .sideLinks {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+
+      .sideLink {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 10px 12px;
+        border: 0;
+        border-radius: var(--ui-radius);
+        background: transparent;
+        color: var(--el-text-color-regular);
+        font: inherit;
+        font-size: 14px;
+        text-align: start;
+        cursor: pointer;
+
+        &:hover { background: var(--el-fill-color-light); }
+        &:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: -2px; }
+
+        &.active {
+          background: var(--el-color-primary-light-9);
+          color: var(--el-color-primary);
+          font-weight: 500;
+        }
+      }
+    }
+
+    .sideFooter {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: auto;
+
+      .el-badge { width: 100%; }
+      .sideButton { width: 100%; margin: 0; justify-content: flex-start; }
+    }
+
+    @media (max-width: 760px) {
+      display: none;
+    }
+  }
+
+  .mainArea {
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
   }
 
   .arrowHint {
@@ -441,7 +578,17 @@ async function createProject(fromPrompt = true) {
     height: 72px;
     padding: 0 clamp(20px, 4vw, 56px);
 
-    .headerActions { display: flex; align-items: center; gap: 12px; }
+    .headerActions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+
+      .compactAction {
+        display: none;
+
+        @media (max-width: 760px) { display: inline-flex; }
+      }
+    }
 
     a {
       text-decoration: none;
@@ -476,27 +623,24 @@ async function createProject(fromPrompt = true) {
       max-width: 800px;
       margin: clamp(32px, 6vh, 64px) auto 56px;
 
-      .brand {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 16px;
+      .hero {
         margin-bottom: 36px;
-
-        .brandLogo {
-          width: 48px;
-          height: 48px;
-
-          .dark & {
-            filter: invert(1);
-          }
-        }
+        text-align: center;
 
         h1 {
           margin: 0;
-          font-size: clamp(30px, 4vw, 38px);
-          font-weight: 600;
+          font-size: clamp(32px, 5vw, 48px);
+          font-weight: 700;
           letter-spacing: -1px;
+          background: linear-gradient(90deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 40%, #a855f7));
+          background-clip: text;
+          color: transparent;
+        }
+
+        p {
+          margin: 8px 0 0;
+          color: var(--el-text-color-secondary);
+          font-size: 15px;
         }
       }
 
@@ -595,6 +739,33 @@ async function createProject(fromPrompt = true) {
             color: var(--el-text-color-regular);
             font-size: 13px;
             line-height: 1.6;
+          }
+        }
+
+        .quickTools {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: center;
+          gap: 10px;
+          margin-top: 16px;
+
+          .quickTool {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border: 1px solid var(--el-border-color-lighter);
+            border-radius: 999px;
+            background: var(--el-bg-color);
+            color: var(--el-text-color-regular);
+            font: inherit;
+            font-size: 13px;
+            cursor: pointer;
+            transition: border-color 0.2s, color 0.2s;
+
+            &:hover:not(:disabled) { border-color: var(--el-color-primary-light-5); color: var(--el-color-primary); }
+            &:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+            &:disabled { cursor: not-allowed; opacity: 0.6; }
           }
         }
       }
