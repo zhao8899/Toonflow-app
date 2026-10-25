@@ -9,6 +9,8 @@ import { lockWorkspaceFiles, resolveWorkspacePath, writeWorkspaceFile } from "@/
 import { beginGeneration, getProviderPrice } from "@/utils/media/billing";
 import { detectMimeType, readPriceReference } from "@/utils/media/priceReference";
 import { startMediaTask } from "@/utils/media/tasks";
+import { downloadPublic, publicAddress } from "@/utils/network/publicDownload";
+import { getRuntimePlatform } from "@/lib/platform";
 
 const maxMediaSize = 100 * 1024 * 1024;
 const mediaExtensions: Record<string, string> = {
@@ -63,6 +65,14 @@ export async function readReference(cwd: string, reference: MediaReference, medi
 
 async function downloadAsset(url: string, signal?: AbortSignal) {
   if (!/^https?:\/\//i.test(url)) invalid("生成结果必须使用 HTTP 或 HTTPS 地址");
+  // 服务器部署时供应商返回的地址不可信：拦截本机、内网与元数据地址，连接时固定已校验 IP，重定向逐跳复查。
+  // ACT: 桌面与本机开发保留原下载方式，兼容本机运行的自建模型服务；该模式下仅本机用户自己可用。
+  if (!getRuntimePlatform().local) {
+    const result = await downloadPublic(publicAddress(url), {
+      signal: signal ?? new AbortController().signal, maxSize: maxMediaSize, tooLarge: "生成文件不能超过 100 MB", accept: "*/*",
+    });
+    return { bytes: result.bytes, mimeType: result.contentType };
+  }
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(t`下载生成结果失败（HTTP ${response.status}）`);
   if (Number(response.headers.get("content-length")) > maxMediaSize) {
