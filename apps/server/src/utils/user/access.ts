@@ -45,7 +45,8 @@ export function requireAccess(req: Request, res: Response, next: NextFunction) {
   return requireAuth(req, res, (cause?: unknown) => {
     if (cause) return next(cause);
     if (res.locals.userRole === "admin") return next();
-    // 成员默认拒绝：只开放会话、项目入口及项目内文件与审片接口；项目接口须携带项目 ID，由项目上下文中间件核对成员身份。
+    // 成员默认拒绝：只开放会话、项目入口、项目内只读文件与审片接口；项目接口须携带项目 ID，由项目上下文中间件核对成员身份。
+    // ACT: 成员暂无画布/文档入口，不开放文件写入、改名、复制和删除；开放创作时再按项目权限细分。
     const path = req.path.toLowerCase().replace(/\/+$/, "");
     const scope = memberRoutes.find(route => route.path === path && route.methods.includes(req.method));
     if (!scope) return res.status(403).json(error("成员账号无权访问此功能", null, 403));
@@ -62,11 +63,6 @@ const memberRoutes = [
   { path: "/projects/get", methods: ["GET", "HEAD"], project: false },
   { path: "/workspaces/files/list", methods: ["GET", "HEAD"], project: true },
   { path: "/workspaces/files/read", methods: ["GET", "HEAD"], project: true },
-  { path: "/workspaces/files/write", methods: ["PUT"], project: true },
-  { path: "/workspaces/files/mkdir", methods: ["POST"], project: true },
-  { path: "/workspaces/files/rename", methods: ["POST"], project: true },
-  { path: "/workspaces/files/copy", methods: ["POST"], project: true },
-  { path: "/workspaces/files/remove", methods: ["DELETE"], project: true },
   { path: "/ai/media/tasks/list", methods: ["GET", "HEAD"], project: true },
   { path: "/ai/media/tasks/get", methods: ["GET", "HEAD"], project: true },
   { path: "/ai/media/tasks/reviewhistory", methods: ["GET", "HEAD"], project: true },
