@@ -45,7 +45,7 @@
     "build:teams": "NODE_ENV=production bun run --filter './packages/teams/*' build",
     "package:desktop": "bun run --filter '@toonflow/desktop' package",
     "release:desktop": "bun run apps/desktop/scripts/release.ts",
-    "typecheck": "bun run --filter '@toonflow/*' typecheck",
+    "typecheck": "bun run --filter \"@toonflow/*\" typecheck",
     "build:tools": "bun -e \"import { rmSync } from '@toonflow/file'; import { resolve } from 'node:path'; rmSync(resolve('build/tools'), { recursive: true, force: true });\" && NODE_ENV=production bun run --filter './packages/tools/*' build"
   },
   "devDependencies": {
