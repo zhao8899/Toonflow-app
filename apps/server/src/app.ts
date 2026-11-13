@@ -14,7 +14,7 @@ import initializePlugins from "@/utils/plugins/initialize";
 import { languageRequest, resolveRequestLocale, runWithLocale, setLocaleFallback, translateError, translateMessage } from "@/lib/i18n";
 import { detectLocale, normalizeLocale } from "@toonflow/i18n";
 
-const autoInstallProviders = ["tfRouter.ts", "apiMart.ts", "metaso.ts", "compshare.ts"];
+const autoInstallProviders = ["daochengCloud.ts"];
 
 export async function createApp({
   webRoot,
@@ -82,6 +82,8 @@ export async function createApp({
   }
   app.use(cors());
   app.use(languageRequest);
+  const { activityMiddleware, isActivityError } = await import("@/utils/activity");
+  app.use("/api", activityMiddleware);
   app.use("/api", requireAccess);
   app.use(["/mcp", "/a2a"], (_req, res, next) => {
     if (!app.locals.authRequired) return next();
@@ -106,6 +108,8 @@ export async function createApp({
   app.use("/api/desktop", desktopRequest);
 
   const { default: initializeProviderModels } = await import("@/utils/ai/initialize");
+  const { default: migrateProviderDefaults } = await import("@/utils/providerDefaults");
+  await migrateProviderDefaults();
   await initializeProviderModels();
   const router = await import("@/router");
   router.default(app);
@@ -122,12 +126,17 @@ export async function createApp({
   }));
   const { createA2aRouter } = await import("@/agent/a2a");
   app.use("/a2a", createA2aRouter());
-  app.use(express.static(webRoot));
+  app.use(express.static(webRoot, {
+    setHeaders(response, filePath) {
+      // 页面入口每次重新获取，避免部署后继续从缓存加载旧资源清单。
+      if (filePath.endsWith(".html")) response.setHeader("Cache-Control", "no-store");
+    },
+  }));
 
   // 错误处理
   app.use((err: Error & { status?: number }, request: Request, response: Response, next: NextFunction) => {
     if (response.headersSent) return next(err);
-    console.error(err);
+    if (!isActivityError(err)) console.error(err);
     const body = errorFromCause(err);
     response.status(body.code).json(body);
   });

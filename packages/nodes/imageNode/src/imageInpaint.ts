@@ -23,7 +23,7 @@ export function useImageInpaint() {
   const { id, node } = useNode();
   const { findNode } = useVueFlow();
   const files = useNodeFiles();
-  const ai = useNodeAi();
+  const ai = useNodeAi(id);
 
   return async function generateInpaint(input: NodeImageRequest, inpaint: ImageInpaint, signal: AbortSignal): Promise<NodeImageResult[]> {
     signal.throwIfAborted();
@@ -32,7 +32,6 @@ export function useImageInpaint() {
       throw new Error("局部重绘素材无效，请重新创建重绘节点");
     }
     const workspace = files.getWorkspaceFiles();
-    const generationId = crypto.randomUUID();
     const canvas = document.createElement("canvas");
     const urls: string[] = [];
     let outputPath = "";
@@ -63,13 +62,13 @@ export function useImageInpaint() {
       if (!context) throw new Error("无法创建绘画画布");
       context.drawImage(mask, 0, 0);
       if (!context.getImageData(0, 0, canvas.width, canvas.height).data.some((value, index) => index % 4 === 3 && value)) throw new Error("局部重绘蒙版为空，请重新涂抹区域");
-      const { directory } = await workspace.list();
+      const { directory } = await workspace.list("", AbortSignal.any([signal, AbortSignal.timeout(20000)]));
       signal.throwIfAborted();
       // ACT: 供应商尚未统一支持原生 mask；使用涂色参考引导，再按本地蒙版合成，严格保留区域外像素。
       const [result] = await ai.generateImage(buildInpaintRequest({
         ...input,
         directory,
-        outputDirectory: `assets/${generationId}`,
+        outputDirectory: `assets/${id}`,
       }, inpaint), signal);
       signal.throwIfAborted();
       if (!result) throw new Error("供应商未返回图片");

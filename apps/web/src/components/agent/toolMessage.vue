@@ -1,6 +1,6 @@
 <template>
   <component v-if="renderer" :is="renderer" :tool="tool" :directory="directory" :toolSessionId="toolSessionId" @copy="emit('copy', $event)" />
-  <el-text v-if="rendererError" type="danger">工具界面加载失败，请停止后重试：{{ rendererError }}</el-text>
+  <el-text v-if="rendererError" type="danger" role="alert">工具展示加载失败，不代表操作失败。请先查看下方结果并保存编辑，停止当前对话后刷新页面；不要重复执行已完成操作。详情：{{ rendererError }}</el-text>
   <chat-reasoning v-model:collapsed="collapsed" class="messageReasoning toolCall" expandIconPlacement="left">
     <template #expandIcon><component :is="collapsed ? IconChevronRight : IconChevronDown" :size="14" aria-hidden="true" /></template>
     <template #header>
@@ -15,10 +15,9 @@
         <template v-if="data">
           <span class="toolLabel">
             {{ index === 0 ? "参数" : "结果" }}
-            <el-button v-if="!data.markdown" text size="small" :icon="IconCopy" :aria-label="index === 0 ? '复制工具参数' : '复制工具结果'" @click="emit('copy', data.content)" />
+            <el-button text size="small" :icon="IconCopy" :aria-label="index === 0 ? '复制工具参数' : '复制工具结果'" @click="emit('copy', data.content)" />
           </span>
-          <messageMarkdown v-if="data.markdown" class="toolData" :class="{ toolError: index === 1 && tool.status === 'error' }" :content="data.markdown" :directory="directory" :codeOptions="toolCodeOptions" />
-          <pre v-else class="toolData toolPlain" :class="{ toolError: index === 1 && tool.status === 'error' }" tabindex="0" :aria-label="index === 0 ? '工具参数' : '工具结果'">{{ data.content }}</pre>
+          <pre class="toolData toolPlain" :class="{ toolError: index === 1 && tool.status === 'error' }" tabindex="0" :aria-label="index === 0 ? '工具参数' : '工具结果'">{{ data.content }}</pre>
         </template>
       </template>
     </div>
@@ -31,7 +30,6 @@ import { loadToolComponent } from "@toonflow/tools-scaffold/client";
 import { IconChevronDown, IconChevronRight, IconCopy, IconTool } from "@tabler/icons-vue";
 import chatReasoning from "@tdesign-vue-next/chat/es/chat-reasoning";
 import type { AgentToolCall } from "@toonflow/server/agent/types";
-import messageMarkdown from "@/components/messageMarkdown.vue";
 
 const { tool, directory, toolSessionId } = defineProps<{ tool: AgentToolCall; directory?: string; toolSessionId?: string }>();
 const emit = defineEmits<{ copy: [content: string] }>();
@@ -61,7 +59,6 @@ onErrorCaptured(error => {
 });
 const collapsed = defineModel<boolean>("collapsed", { default: true });
 const toolStatusLabels = { running: "调用中…", success: "已完成", error: "调用失败", interrupted: "已中断" };
-const toolCodeOptions = { maxHeight: 240, lineNumbers: false };
 const args = computed(() => formatToolData(tool.args));
 const result = computed(() => formatToolData(tool.result));
 
@@ -69,10 +66,10 @@ function formatToolData(value: unknown) {
   if (value === undefined) return;
   try {
     const content = JSON.stringify(typeof value === "string" ? JSON.parse(value) : value, null, 2) ?? "";
-    // ACT: 超过 16K 字符只渲染完整文本，限制高亮与 token DOM 开销；更大数据量可改为虚拟行。
-    return { content, markdown: content.length <= 16_384 ? `~~~json\n${content}\n~~~` : undefined };
+    // ACT: 工具参数与结果直接展示文本，不让代码高亮的懒加载失败影响工具卡片。
+    return { content };
   } catch {
-    return { content: String(value), markdown: undefined };
+    return { content: String(value) };
   }
 }
 </script>

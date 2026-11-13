@@ -13,8 +13,7 @@
     @after-enter="popoverPanel?.focusSelected()">
     <template #reference>
       <button ref="triggerButton" class="languageTrigger" type="button" :aria-label="translate('语言')" @keydown.esc.stop.prevent="closePopover">
-        <icon-world v-if="uiSettings.language === 'system'" :size="20" aria-hidden="true" />
-        <svg v-else class="languageFlag" viewBox="0 0 32 24" aria-hidden="true"><use :href="`${languageFlags}#${flagIds[locale]}`" /></svg>
+        <svg class="languageFlag" viewBox="0 0 32 24" aria-hidden="true"><use :href="`${languageFlags}#${flagIds[locale]}`" /></svg>
         <span class="triggerName" :lang="locale" dir="auto">{{ selectedName }}</span>
         <icon-chevron-down class="triggerChevron" :class="{ opened: visible }" :size="15" aria-hidden="true" />
       </button>
@@ -31,21 +30,9 @@
     </div>
   </el-popover>
   <div v-else ref="panel" class="languagePanel" role="radiogroup" :aria-label="translate('语言')" @keydown="navigateLanguages">
-    <button
-      class="systemCard"
-      type="button"
-      role="radio"
-      :aria-checked="uiSettings.language === 'system'"
-      :tabindex="uiSettings.language === 'system' ? 0 : -1"
-      data-language="system"
-      @click="changeLanguage('system')">
-      <span class="systemIcon"><icon-device-desktop :size="22" aria-hidden="true" /></span>
-      <span class="systemText"><strong>{{ translate('跟随系统') }}</strong><small dir="auto">{{ systemLanguageName }}</small></span>
-      <span class="selectionMark" aria-hidden="true"><icon-check v-if="uiSettings.language === 'system'" :size="12" stroke="3" /></span>
-    </button>
     <div class="languageGrid">
       <button
-        v-for="language in supportedLocales"
+        v-for="language in supportedLocales.filter(item => item.code === 'zh-CN' || item.code === 'en')"
         :key="language.code"
         class="languageCard"
         type="button"
@@ -66,8 +53,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
-import { IconCheck, IconChevronDown, IconDeviceDesktop, IconLanguage, IconWorld, IconX } from "@tabler/icons-vue";
-import { detectLocale, isRtlLocale, supportedLocales, type Locale } from "@toonflow/i18n";
+import { IconCheck, IconChevronDown, IconLanguage, IconX } from "@tabler/icons-vue";
+import { isRtlLocale, supportedLocales, type Locale } from "@toonflow/i18n";
 import { locale, translate } from "@toonflow/i18n/vue";
 import { uiSettings, updateUiSettings } from "@/stores/settings";
 import languageFlags from "@/assets/languageFlags.svg?url";
@@ -82,7 +69,6 @@ const flagIds: Record<Locale, string> = {
   "zh-CN": "cn", "zh-TW": "cn", en: "us", ja: "jp", ru: "ru", vi: "vn", th: "th", ko: "kr", hi: "in",
   id: "id", ms: "my", fil: "ph", bn: "bd", ur: "pk", ta: "in", te: "in", mr: "in", pa: "in", ar: "sa", fa: "ir", tr: "tr",
 };
-const systemLanguageName = computed(() => supportedLocales.find(language => language.code === (uiSettings.value.language === "system" ? locale.value : detectLocale(navigator.languages)))?.name);
 const selectedName = computed(() => supportedLocales.find(language => language.code === locale.value)?.name);
 const rtl = computed(() => isRtlLocale(locale.value));
 

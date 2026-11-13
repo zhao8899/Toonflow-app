@@ -370,7 +370,7 @@ export async function run(
         }
         firstTokenAt = undefined;
         modelError = event.message.stopReason === "error" ? event.message.errorMessage || "模型请求失败"
-          : event.message.stopReason === "length" ? "模型回复因长度限制被截断，未能完整生成回答。" : undefined;
+          : event.message.stopReason === "length" ? "本次回复达到模型输出长度上限。已完成的工具操作不会自动回滚；请先检查节点内容，再要求分段继续未完成部分，避免重复创建或生成。" : undefined;
         limited = event.message.stopReason === "length";
       }
     });

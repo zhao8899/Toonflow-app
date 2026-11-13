@@ -3,57 +3,53 @@
     <bg class="pageBackground" />
     <aside class="sideNav" aria-label="侧边导航">
       <div class="sideBrand">
-        <el-image class="brandLogo" :src="logoUrl" fit="contain" alt="" />
-        <span>Toonflow</span>
+        <span>DCtiv</span>
       </div>
       <nav class="sideLinks">
-        <button type="button" class="sideLink" :class="{ active: activeSection === 'create' }" :aria-current="activeSection === 'create' ? 'page' : undefined" @click="scrollToSection('create')">
+        <button type="button" class="sideLink" :class="{ active: activeSection === 'create' }" :aria-current="activeSection === 'create' ? 'page' : undefined" @click="selectSection('create')">
           <icon-home :size="18" aria-hidden="true" />首页
         </button>
-        <button type="button" class="sideLink" :class="{ active: activeSection === 'projects' }" :aria-current="activeSection === 'projects' ? 'page' : undefined" @click="scrollToSection('projects')">
+        <button type="button" class="sideLink" :class="{ active: activeSection === 'projects' }" :aria-current="activeSection === 'projects' ? 'page' : undefined" @click="selectSection('projects')">
           <icon-folders :size="18" aria-hidden="true" />项目
         </button>
       </nav>
       <div class="sideFooter">
+        <el-button text class="sideButton" :icon="IconSettings" @click="openModelSettings">模型接入</el-button>
         <el-badge isDot :hidden="!hasDesktopUpdate">
-          <el-button class="sideButton" :icon="IconSettings" :aria-label="hasDesktopUpdate ? '设置，有新版本可用' : '设置'" @click="settingsVisible = true">设置</el-button>
+          <el-button text class="sideButton" :icon="IconSettings" :aria-label="hasDesktopUpdate ? '设置，有新版本可用' : '设置'" @click="settingsPanel = undefined; settingsVisible = true">设置</el-button>
         </el-badge>
-        <el-button v-if="!authRequired" class="sideButton" :type="deviceHubEnabled ? 'success' : undefined" :plain="deviceHubEnabled" :icon="deviceHubEnabled || mobileConnection.mode === 'remote' ? IconDeviceDesktop : IconQrcode" @click="mobileConnectVisible = true">{{ mobileConnectionLabel }}</el-button>
+        <el-button v-if="!authRequired" text class="sideButton" :type="deviceHubEnabled ? 'success' : undefined" :icon="deviceHubEnabled || mobileConnection.mode === 'remote' ? IconDeviceDesktop : IconQrcode" @click="mobileConnectVisible = true">{{ mobileConnectionLabel }}</el-button>
       </div>
     </aside>
     <el-container class="mainArea">
     <el-header class="pageHeader">
       <div class="headerActions">
         <sessionMenu />
+        <el-button class="compactAction" text @click="openModelSettings">模型接入</el-button>
         <!-- 窄屏隐藏侧边栏时，设置入口回到顶部 -->
         <el-badge class="compactAction" isDot :hidden="!hasDesktopUpdate">
-          <el-button circle :icon="IconSettings" :aria-label="hasDesktopUpdate ? '设置，有新版本可用' : '设置'" @click="settingsVisible = true" />
+          <el-button circle :icon="IconSettings" :aria-label="hasDesktopUpdate ? '设置，有新版本可用' : '设置'" @click="settingsPanel = undefined; settingsVisible = true" />
         </el-badge>
         <el-button v-if="!authRequired" class="compactAction" circle :icon="deviceHubEnabled || mobileConnection.mode === 'remote' ? IconDeviceDesktop : IconQrcode" :aria-label="mobileConnectionLabel" @click="mobileConnectVisible = true" />
       </div>
-      <div class="githubAction">
-        <span class="arrowHint starHint">
-          点个 Star 支持一下
-          <svg viewBox="0 0 84 44" fill="none" aria-hidden="true">
-            <path d="M4 29C18 40 44 38 44 18C44 1 21 3 24 19C27 37 57 32 77 16M65 17L77 16L73 28" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </span>
-        <el-button round size="large" :icon="IconBrandGithub" tag="a" href="https://github.com/HBAI-Ltd/Toonflow-app" target="_blank" rel="noopener noreferrer">GitHub</el-button>
-      </div>
     </el-header>
     <el-main class="pageContent">
-      <section ref="createSection" class="creationPanel" aria-label="创建项目">
+      <section v-show="activeSection === 'create'" class="creationPanel" aria-label="创建项目">
         <div class="hero">
-          <h1>Toonflow</h1>
-          <p>AI 短剧、漫剧与视频创作</p>
+          <div>
+            <h1>开始创作</h1>
+            <p>AI 短剧、漫剧与视频创作</p>
+          </div>
+          <el-button type="primary" :icon="IconFolderPlus" :disabled="creating || opening" @click="createProject(false)">新建项目</el-button>
+        </div>
+        <div class="creationTools" role="group" aria-label="快捷创作">
+          <button v-for="tool in quickTools" :key="tool.label" type="button" class="creationTool" :disabled="creating || opening" @click="useQuickTool(tool.prompt)">
+            <component :is="tool.icon" :size="24" aria-hidden="true" />
+            <span>{{ tool.label }}</span>
+          </button>
         </div>
         <div class="promptArea">
-          <span class="arrowHint inspirationHint">
-            灵感创作模式
-            <svg viewBox="0 0 60 60" fill="none" aria-hidden="true">
-              <path d="M4 9C21 0 44 5 40 23C36 39 14 34 22 20C30 7 49 21 47 52M38 43L47 52L54 42" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </span>
+          <h2 class="composerTitle">描述你的创意</h2>
           <el-card class="promptCard" :class="{ draggingAttachments }" shadow="never" :bodyStyle="{ padding: '20px' }" :footerStyle="{ padding: '12px 16px' }" @dragenter.capture="dragEnterAttachments" @dragover.capture="dragOverAttachments" @dragleave.capture="dragLeaveAttachments" @drop.capture="dropAttachments">
             <div v-if="draggingAttachments" class="attachmentDropOverlay" role="status" aria-live="polite">
               <icon-paperclip :size="20" aria-hidden="true" />
@@ -77,20 +73,21 @@
               <p v-if="!workspaceDirectory" class="workspaceHint" role="status">请先选择一个空文件夹作为工作目录，画布和素材会保存在这里。</p>
             </template>
           </el-card>
-          <div class="quickTools" role="group" aria-label="快捷创作">
-            <button v-for="tool in quickTools" :key="tool.label" type="button" class="quickTool" :disabled="creating || opening" @click="useQuickTool(tool.prompt)">
-              <component :is="tool.icon" :size="16" aria-hidden="true" />{{ tool.label }}
-            </button>
-          </div>
         </div>
       </section>
-      <section ref="projectsSection" class="projectList" aria-labelledby="projectListTitle">
+      <section v-show="activeSection === 'projects' || projectList.length" class="projectList" aria-labelledby="projectListTitle">
         <div class="sectionHeader">
-          <h2 id="projectListTitle">项目列表</h2>
-          <el-space wrap>
+          <h2 id="projectListTitle">{{ activeSection === 'projects' ? '我的项目' : '最近打开' }} <span v-if="activeSection === 'projects'" class="projectCount">{{ projectList.length }}</span></h2>
+          <el-button v-if="activeSection === 'create'" text @click="selectSection('projects')">查看全部项目</el-button>
+          <el-space v-else wrap>
             <serverProjects v-if="authRequired" :disabled="creating || opening" @open="openServerProject" />
             <el-button :icon="IconFolderOpen" :disabled="creating || opening" @click="openProject()">导入项目</el-button>
-            <el-button :icon="IconFolderPlus" :disabled="creating || opening" @click="createProject(false)">添加项目</el-button>
+            <el-button type="primary" :icon="IconFolderPlus" :disabled="creating || opening" @click="createProject(false)">新建项目</el-button>
+          </el-space>
+        </div>
+        <div v-if="activeSection === 'projects'" class="projectToolbar">
+          <el-input v-model="projectSearch" class="projectSearch" clearable :prefixIcon="IconSearch" placeholder="搜索项目名称或目录" aria-label="搜索项目" />
+          <el-space wrap>
             <el-button circle :icon="sortDescending ? IconSortDescending : IconSortAscending" :aria-label="sortDescending ? '按时间降序' : '按时间升序'" @click="sortDescending = !sortDescending" />
             <el-radio-group v-model="viewMode" aria-label="项目视图">
               <el-radio-button value="grid" aria-label="网格视图"><icon-layout-grid :size="16" /></el-radio-button>
@@ -98,8 +95,8 @@
             </el-radio-group>
           </el-space>
         </div>
-        <div class="projectItems" :class="{ listView: viewMode === 'list' }">
-          <el-card v-for="project in sortedProjects" :key="project.directory" class="projectCard" shadow="hover" :bodyStyle="{ padding: '0' }">
+        <div class="projectItems" :class="{ listView: activeSection === 'projects' && viewMode === 'list' }">
+          <el-card v-for="project in visibleProjects" :key="project.directory" class="projectCard" shadow="hover" :bodyStyle="{ padding: '0' }">
             <button class="projectEntry" type="button" :disabled="creating || opening" :aria-label="`打开项目 ${project.name}`" @click="openProject(project)">
               <icon-folder class="projectIcon" :size="28" aria-hidden="true" />
               <span class="projectInfo">
@@ -108,7 +105,7 @@
                 <span class="projectTime">最近打开 {{ new Date(project.lastOpenedAt).toLocaleString(locale, { hour12: false }) }}</span>
               </span>
             </button>
-            <div class="projectActions">
+            <div v-if="activeSection === 'projects'" class="projectActions">
               <el-button text :icon="IconEdit" :disabled="creating || opening" :aria-label="`重命名项目 ${project.name}`" title="重命名" @click="renameProject(project)" />
               <el-button text type="danger" :icon="IconFolderMinus" :disabled="creating || opening" :aria-label="`移除项目 ${project.name}`" title="从列表移除，不删除文件" @click="workspaceStore.removeProject(project.directory)" />
             </div>
@@ -117,7 +114,7 @@
       </section>
     </el-main>
     </el-container>
-    <settings v-model="settingsVisible" />
+    <settings v-model="settingsVisible" :initialPanel="settingsPanel" />
     <mobileConnect v-model="mobileConnectVisible" />
     <workspacePicker ref="relocationPicker" hideTrigger />
   </div>
@@ -128,12 +125,12 @@ import { locale, translate } from "@toonflow/i18n/vue";
 import axios from "axios";
 import { storeToRefs } from "pinia";
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, type InputInstance } from "element-plus";
 import { getReadableFileMimeType, readableFileAccept } from "@toonflow/server/documentFormats";
 import {
-  IconSettings, IconBrandGithub, IconQrcode, IconDeviceDesktop,
-  IconArrowUp, IconLayoutGrid,
+  IconSettings, IconQrcode, IconDeviceDesktop,
+  IconArrowUp, IconLayoutGrid, IconSearch,
   IconList, IconSortDescending,
   IconSortAscending, IconFolder, IconEdit,
   IconFolderMinus, IconFolderPlus, IconFolderOpen, IconPaperclip,
@@ -143,7 +140,7 @@ import modelPopover from "@/components/modelPopover.vue";
 import attachmentList from "@/components/agent/attachmentList.vue";
 import { createPastedTextFile, readTextAttachment } from "@/components/agent/textAttachments";
 import type { AgentAttachment } from "@/components/agent/types";
-import logoUrl from "@toonflow/assets/logo.svg";
+
 import { useWorkspaceStore, type Project } from "@/stores/workspace";
 import { hasDesktopUpdate } from "@/stores/desktopUpdate";
 import { deviceHubEnabled, mobileConnection, mobileConnectionLabel } from "@/lib/mobile";
@@ -156,6 +153,11 @@ import workspacePicker from "./workspacePicker.vue";
 import serverProjects from "./serverProjects.vue";
 
 const settingsVisible = ref(false);
+const settingsPanel = ref<"languageModel" | "mediaModel">();
+function openModelSettings() {
+  settingsPanel.value = "mediaModel";
+  settingsVisible.value = true;
+}
 const mobileConnectVisible = ref(false);
 const mobileConnect = defineAsyncComponent(() => import("@/components/mobileConnect.vue"));
 const router = useRouter();
@@ -236,9 +238,8 @@ watch([creating, opening], ([creating, opening]) => {
   if (creating || opening) clearAttachmentDrag();
 }, { flush: "sync" });
 
-const createSection = ref<HTMLElement>();
-const projectsSection = ref<HTMLElement>();
-const activeSection = ref<"create" | "projects">("create");
+const route = useRoute();
+const activeSection = computed(() => route.query.view === "projects" ? "projects" : "create");
 const quickTools = [
   { label: "视频生成", icon: IconMovie, prompt: "生成一段视频：" },
   { label: "图片生成", icon: IconPhoto, prompt: "生成一张图片：" },
@@ -246,10 +247,8 @@ const quickTools = [
   { label: "剧本生成", icon: IconScript, prompt: "根据以下故事创作剧本：" },
 ];
 
-function scrollToSection(section: "create" | "projects") {
-  activeSection.value = section;
-  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  (section === "create" ? createSection : projectsSection).value?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+function selectSection(section: "create" | "projects") {
+  void router.push({ query: { ...route.query, view: section === "projects" ? "projects" : undefined } });
 }
 
 // 快捷标签只在输入框开头补充任务说明，保留已输入内容，仍由用户确认后发送。
@@ -265,9 +264,15 @@ const selectedModel = ref("");
 const reasoningEffort = ref("");
 const sortDescending = ref(true);
 const viewMode = ref("grid");
+const projectSearch = ref("");
 const sortedProjects = computed(() => [...projectList.value].sort((left, right) =>
   sortDescending.value ? right.lastOpenedAt - left.lastOpenedAt : left.lastOpenedAt - right.lastOpenedAt
 ));
+const visibleProjects = computed(() => {
+  if (activeSection.value === "create") return [...projectList.value].sort((left, right) => right.lastOpenedAt - left.lastOpenedAt).slice(0, 4);
+  const query = projectSearch.value.trim().toLocaleLowerCase();
+  return sortedProjects.value.filter(item => `${item.name} ${item.directory}`.toLocaleLowerCase().includes(query));
+});
 
 function pasteAttachments(event: ClipboardEvent) {
   if (creating.value || opening.value) return;
@@ -473,25 +478,29 @@ async function createProject(fromPrompt = true) {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    gap: 24px;
-    width: 200px;
+    gap: 32px;
+    width: 224px;
     height: 100dvh;
-    padding: 20px 12px;
+    padding: 28px 16px 20px;
+    overflow-y: auto;
     border-inline-end: 1px solid var(--el-border-color-lighter);
-    background: color-mix(in srgb, var(--el-bg-color) 80%, transparent);
-    backdrop-filter: blur(12px);
+    background: var(--el-bg-color);
 
     .sideBrand {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 0 8px;
-      font-size: 18px;
-      font-weight: 600;
+      gap: 12px;
+      min-height: 36px;
+      padding: 0 12px;
+      flex-shrink: 0;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
 
       .brandLogo {
-        width: 28px;
-        height: 28px;
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
 
         .dark & { filter: invert(1); }
       }
@@ -500,22 +509,28 @@ async function createProject(fromPrompt = true) {
     .sideLinks {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 8px;
 
       .sideLink {
+        position: relative;
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 12px;
         width: 100%;
-        padding: 10px 12px;
+        min-height: 48px;
+        padding: 12px 16px;
         border: 0;
-        border-radius: var(--ui-radius);
+        border-radius: var(--ui-radius-large);
         background: transparent;
         color: var(--el-text-color-regular);
         font: inherit;
         font-size: 14px;
         text-align: start;
+        white-space: nowrap;
         cursor: pointer;
+        transition: background-color 0.15s, color 0.15s;
+
+        svg { flex-shrink: 0; }
 
         &:hover { background: var(--el-fill-color-light); }
         &:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: -2px; }
@@ -523,29 +538,88 @@ async function createProject(fromPrompt = true) {
         &.active {
           background: var(--el-color-primary-light-9);
           color: var(--el-color-primary);
-          font-weight: 500;
+          font-weight: 600;
+
+          &::before {
+            content: "";
+            position: absolute;
+            inset-inline-start: 0;
+            top: 16px;
+            bottom: 16px;
+            width: 3px;
+            border-radius: 3px;
+            background: var(--el-color-primary);
+          }
         }
+
+        @media (prefers-reduced-motion: reduce) { transition: none; }
       }
     }
 
     .sideFooter {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 4px;
       margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid var(--el-border-color-lighter);
 
       .el-badge { width: 100%; }
-      .sideButton { width: 100%; margin: 0; justify-content: flex-start; }
+      .sideButton {
+        width: 100%;
+        height: auto;
+        min-height: 44px;
+        margin: 0;
+        padding: 12px 16px;
+        justify-content: flex-start;
+        border-radius: var(--ui-radius-large);
+        white-space: normal;
+        text-align: start;
+        line-height: 1.5;
+
+        :deep(.el-icon) { font-size: 18px; flex-shrink: 0; }
+        :deep(.el-icon + span) { margin-inline-start: 12px; }
+        &:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: -2px; }
+      }
     }
 
     @media (max-width: 760px) {
-      display: none;
+      width: 100%;
+      height: auto;
+      box-sizing: border-box;
+      z-index: 1;
+      gap: 12px;
+      padding: 12px 16px;
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      border-inline-end: 0;
+      border-bottom: 1px solid var(--el-border-color-lighter);
+      .sideBrand { padding: 0; font-size: 18px; }
+      .sideLinks {
+        flex-direction: row;
+        margin-inline-start: auto;
+        gap: 4px;
+        .sideLink { min-height: 44px; padding: 10px 12px; gap: 8px; }
+      }
+      .sideFooter { display: none; }
+    }
+
+    @media (max-width: 400px) {
+      .sideLinks {
+        width: 100%;
+        .sideLink { justify-content: center; }
+      }
     }
   }
 
   .mainArea {
     flex: 1;
     min-width: 0;
+    flex-direction: column;
+  }
+
+  @media (max-width: 760px) {
     flex-direction: column;
   }
 
@@ -594,42 +668,52 @@ async function createProject(fromPrompt = true) {
       text-decoration: none;
     }
 
-    .githubAction {
-      position: relative;
-
-      .starHint {
-        top: 0;
-        inset-inline-end: calc(100% + 12px);
-        height: 100%;
-
-        &:dir(rtl) svg { transform: scaleX(-1); }
-
-        @media (max-width: 560px) {
-          top: calc(100% + 6px);
-          inset-inline-end: 0;
-          height: auto;
-
-          svg { transform: rotate(-45deg); }
-          &:dir(rtl) svg { transform: scaleX(-1) rotate(-45deg); }
-        }
-      }
-    }
   }
 
   .pageContent {
     padding: 24px clamp(20px, 4vw, 56px) 56px;
 
     .creationPanel {
-      max-width: 800px;
-      margin: clamp(32px, 6vh, 64px) auto 56px;
+      max-width: 1040px;
+      margin: 0 auto 40px;
+
+      .creationTools {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 32px;
+
+        .creationTool {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-height: 88px;
+          padding: 20px;
+          border: 1px solid var(--el-border-color-lighter);
+          border-radius: var(--ui-radius);
+          background: var(--el-bg-color);
+          color: var(--el-text-color-primary);
+          font: inherit;
+          cursor: pointer;
+          svg { flex-shrink: 0; color: var(--el-color-primary); }
+          &:hover:not(:disabled) { border-color: var(--el-color-primary); background: var(--el-fill-color-light); }
+          &:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 3px; }
+          &:disabled { opacity: 0.6; cursor: wait; }
+        }
+        @media (max-width: 760px) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      }
 
       .hero {
-        margin-bottom: 36px;
-        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-bottom: 24px;
 
         h1 {
           margin: 0;
-          font-size: clamp(32px, 5vw, 48px);
+          font-size: 28px;
           font-weight: 700;
           letter-spacing: -1px;
           background: var(--ui-accent-gradient);
@@ -646,6 +730,8 @@ async function createProject(fromPrompt = true) {
 
       .promptArea {
         position: relative;
+
+        .composerTitle { margin: 0 0 16px; font-size: 18px; font-weight: 600; }
 
         .inspirationHint {
           bottom: calc(100% + 4px);
@@ -775,13 +861,35 @@ async function createProject(fromPrompt = true) {
       max-width: 1040px;
       margin: 0 auto;
 
+      .projectCount { margin-left: 8px; color: var(--el-text-color-secondary); font-size: 14px; font-weight: 400; }
+
+      .projectToolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-top: 20px;
+        .projectSearch { width: min(360px, 100%); }
+      }
+
       .projectItems {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
         gap: 16px;
         margin-top: 16px;
 
-        &.listView { grid-template-columns: 1fr; }
+        &.listView {
+          grid-template-columns: 1fr;
+          .projectEntry .projectInfo {
+            flex: 1;
+            display: grid;
+            grid-template-columns: minmax(100px, 1fr) minmax(120px, 2fr) auto;
+            align-items: center;
+            gap: 16px;
+            @media (max-width: 900px) { display: flex; align-items: flex-start; gap: 6px; }
+          }
+        }
 
         .projectCard {
           position: relative;

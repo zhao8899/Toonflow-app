@@ -21,6 +21,7 @@ export function useNode<T extends NodeOutputs = NodeOutputs>(options: NodeOption
   const { id, node } = useFlowNode<NodeData>();
   const documentContext = inject<NodeDocumentContext | undefined>("nodeDocument", undefined);
   const getNodeConfig = inject<((nodeType: string) => Record<string, unknown>) | undefined>("nodeConfig", undefined);
+  const getProjectId = inject<(() => string | undefined) | undefined>("workspaceProjectId", undefined);
   const config = computed(() => readonly(getNodeConfig?.(node.type ?? "") ?? {}));
   const previewReady = useNodePreviewReady();
   const { updateNodeInternals } = useVueFlow();
@@ -53,7 +54,7 @@ export function useNode<T extends NodeOutputs = NodeOutputs>(options: NodeOption
     outputs,
     nodeEvent,
     nodeTools,
-    ai: useNodeAi(),
+    ai: useNodeAi(id, getProjectId),
     ffmpeg: useNodeFfmpeg(),
     files: {
       getWorkspaceFiles,

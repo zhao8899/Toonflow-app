@@ -6,13 +6,37 @@ import { z } from "zod";
 import conf from "@/utils/conf";
 import { resolveWorkspace } from "@/utils/workspace";
 
+export const mediaModelGrantSchema = z.object({
+  providerId: z.string().regex(/^[a-z][a-zA-Z0-9]*$/).max(100),
+  modelId: z.string().min(1).max(200),
+}).strict();
+
+const generationPolicySchema = z.object({
+  enabled: z.boolean(), dailyLimit: z.number().int().min(0).max(1000),
+});
+const generationAuditSchema = z.object({
+  id: z.uuid(), createdAt: z.iso.datetime(),
+  actor: z.object({ id: z.string().min(1), username: z.string().min(1) }),
+  previous: generationPolicySchema, current: generationPolicySchema,
+});
+
 const projectSchema = z.object({
   id: z.uuid(), name: z.string().min(1).max(100), directory: z.string().min(1),
   createdAt: z.string(), createdBy: z.string().min(1),
   // 旧登记记录没有成员字段，读取时视为无成员。
   members: z.array(z.string()).default([]),
+  memberGenerationEnabled: z.boolean().default(false),
+  memberDailyGenerationLimit: z.number().int().min(0).max(1000).default(0),
+  generationAudit: z.array(generationAuditSchema).max(100).default([]),
+  mediaModels: z.array(mediaModelGrantSchema).max(100).default([]),
 });
 type Project = z.infer<typeof projectSchema>;
+/** Audit records are exposed only by the administrator history endpoint. */
+export function publicProject(project: Omit<Project, "generationAudit"> & { generationAudit?: Project["generationAudit"] }) {
+  const { generationAudit, ...result } = project;
+  return result;
+}
+
 const registryPath = () => resolve(dirname(conf.path), "projects.json");
 
 function readProjects() {
@@ -52,7 +76,9 @@ export async function getMemberProject(req: Request, id: string, userId: string,
   const project = readProjects().find(project => project.id === id.toLowerCase());
   if (!project || !canAccessProject(project, userId, role)) throw Object.assign(new Error("项目不存在"), { status: 404 });
   const resolved = await getProject(req, id);
-  return role === "admin" ? resolved : { ...resolved, members: [] };
+  const current = readProjects().find(project => project.id === resolved.id);
+  if (!current || !canAccessProject(current, userId, role)) throw Object.assign(new Error("项目不存在"), { status: 404 });
+  return publicProject(role === "admin" ? { ...resolved, ...current } : { ...resolved, ...current, members: [] });
 }
 
 export async function resolveRequestProject(req: Request, userId: string, role: string) {
@@ -68,7 +94,10 @@ export async function resolveRequestProject(req: Request, userId: string, role: 
   if (relative(project.directory, directory) !== "") {
     throw Object.assign(new Error("项目 ID 与请求工作目录不匹配"), { status: 403 });
   }
-  return project;
+  // 路径校验包含异步磁盘操作，返回前重读授权，避免成员撤销或白名单更新被旧快照覆盖。
+  const current = readProjects().find(item => item.id === project.id);
+  if (!current || !canAccessProject(current, userId, role)) throw Object.assign(new Error("项目不存在"), { status: 404 });
+  return publicProject(role === "admin" ? current : { ...current, members: [] });
 }
 
 export function registerProject(directory: string, name: string, createdBy: string) {
@@ -82,7 +111,7 @@ export function registerProject(directory: string, name: string, createdBy: stri
   if (projects.some(project => contains(project.directory, directory) || contains(directory, project.directory))) {
     throw Object.assign(new Error("项目目录不能与已登记项目相互包含"), { status: 409 });
   }
-  const project: Project = { id: randomUUID(), name, directory, createdAt: new Date().toISOString(), createdBy, members: [] };
+  const project: Project = { id: randomUUID(), name, directory, createdAt: new Date().toISOString(), createdBy, members: [], generationAudit: [], mediaModels: [], memberGenerationEnabled: false, memberDailyGenerationLimit: 0 };
   saveProjects([project, ...projects]);
   return project;
 }
@@ -96,7 +125,7 @@ export function listProjects(offset: number, limit: number, memberId?: string) {
   const projects = memberId ? readProjects().filter(project => project.members.includes(memberId)) : readProjects();
   return {
     total: projects.length,
-    projects: projects.slice(offset, offset + limit).map(project => memberId ? { ...project, members: [] } : project),
+    projects: projects.slice(offset, offset + limit).map(project => publicProject(memberId ? { ...project, members: [] } : project)),
   };
 }
 
@@ -116,6 +145,49 @@ export function setProjectMembers(id: string, members: string[], isMember: (user
   return project;
 }
 
+export function findProject(directory: string) {
+  return readProjects().find(project => relative(project.directory, directory) === "");
+}
+
 export function findProjectId(directory: string) {
-  return readProjects().find(project => relative(project.directory, directory) === "")?.id;
+  return findProject(directory)?.id;
+}
+
+/** 完整替换项目模型授权；删除的供应商或模型不会因保留授权而重新出现。 */
+export function setProjectMediaModels(id: string, models: z.infer<typeof mediaModelGrantSchema>[]) {
+  const projects = readProjects();
+  const project = projects.find(project => project.id === id.toLowerCase());
+  if (!project) throw Object.assign(new Error("项目不存在"), { status: 404 });
+  project.mediaModels = models.filter((model, index) => models.findIndex(item =>
+    item.providerId === model.providerId && item.modelId === model.modelId) === index);
+  saveProjects(projects);
+  return project;
+}
+
+export function setProjectGeneration(id: string, enabled: boolean, dailyLimit: number, actor: { id: string; username: string }) {
+  const projects = readProjects();
+  const project = projects.find(item => item.id === id.toLowerCase());
+  if (!project) throw Object.assign(new Error("项目不存在"), { status: 404 });
+  if (project.memberGenerationEnabled === enabled && project.memberDailyGenerationLimit === dailyLimit) return project;
+  {
+    const entry = generationAuditSchema.parse({
+      id: randomUUID(), createdAt: new Date().toISOString(), actor,
+      previous: { enabled: project.memberGenerationEnabled, dailyLimit: project.memberDailyGenerationLimit },
+      current: { enabled, dailyLimit },
+    });
+    project.generationAudit = [...project.generationAudit, entry].slice(-100);
+  }
+  project.memberGenerationEnabled = enabled;
+  project.memberDailyGenerationLimit = dailyLimit;
+  saveProjects(projects);
+  return project;
+}
+
+export function assertMemberGeneration(id: string, userId: string, providerId: string, modelId: string) {
+  const project = readProjects().find(item => item.id === id);
+  if (!project?.members.includes(userId) || !project.memberGenerationEnabled ||
+    !project.mediaModels.some(model => model.providerId === providerId && model.modelId === modelId)) {
+    throw Object.assign(new Error("项目未授权此成员生成请求"), { status: 403 });
+  }
+  return project;
 }

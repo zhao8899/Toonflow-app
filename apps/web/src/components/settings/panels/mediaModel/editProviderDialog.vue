@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    :title="`编辑媒体供应商：${provider?.label ?? ''}`"
+    :title="`配置连接与模型：${provider?.label ?? ''}`"
     width="min(800px, calc(100vw - 32px))"
     alignCenter
     appendToBody
@@ -12,13 +12,16 @@
     @closed="formApi = undefined">
     <div class="providerEditor">
       <messageMarkdown v-if="provider?.readme" class="providerReadme" :content="provider.readme" />
+      <h4>连接配置</h4>
+      <el-text type="info" size="small">按平台要求填写连接信息。保存只更新配置，不验证连接或调用模型。</el-text>
       <form-create v-model="formValues" v-model:api="formApi" :rule="formRules" :option="formOptions" />
       <div class="modelHeader">
-        <h4>模型配置 <el-text type="info">{{ models.length }}</el-text></h4>
+        <h4>模型列表 <el-text type="info">{{ filteredModels.length }} / {{ models.length }}</el-text></h4>
         <el-button :icon="IconPlus" size="small" :disabled="saving" @click="editModel()">手动添加</el-button>
       </div>
+      <el-input v-model="modelSearch" class="modelSearch" clearable :disabled="saving" placeholder="搜索模型名称、ID 或类型（图片 / 视频 / 音频 / 文本）" aria-label="搜索模型" />
       <div class="modelList">
-        <el-card v-for="(item, index) in models" :key="index" class="modelCard" shadow="never">
+        <el-card v-for="{ item, index } in filteredModels" :key="index" class="modelCard" shadow="never">
           <div class="topInfo">
             <div class="modelNameWrap">
               <modelIcon :model="item.id" :size="24" />
@@ -38,6 +41,7 @@
           </div>
         </el-card>
         <el-text v-if="!models.length" type="info">暂无模型</el-text>
+        <el-text v-else-if="!filteredModels.length" type="info">没有匹配的模型，请调整搜索内容。</el-text>
       </div>
     </div>
     <el-alert v-if="formError" class="formError" :title="formError" type="error" :closable="false" showIcon />
@@ -72,6 +76,12 @@ const modelEditorDialog = shallowRef<Component>();
 const visible = defineModel<boolean>({ default: false });
 const emit = defineEmits<{ saved: [provider: MediaProvider] }>();
 const models = ref<MediaProviderModel[]>([]);
+const modelSearch = ref("");
+const filteredModels = computed(() => {
+  const query = modelSearch.value.trim().toLocaleLowerCase();
+  return models.value.map((item, index) => ({ item, index }))
+    .filter(({ item }) => !query || `${item.label} ${item.id} ${item.type} ${modelTypes[item.type]}`.toLocaleLowerCase().includes(query));
+});
 const modelEditorVisible = ref(false);
 const editingModelIndex = ref<number>();
 const saving = ref(false);
@@ -91,6 +101,7 @@ const modeLabels: Record<string, string> = {
 watch(visible, isVisible => {
   if (!isVisible) return;
   formError.value = "";
+  modelSearch.value = "";
   modelEditorVisible.value = false;
   editingModelIndex.value = undefined;
   const configs = settings.value.mediaProviderConfigs as Record<string, Record<string, unknown>> | undefined;
@@ -185,6 +196,7 @@ async function saveModels() {
   overscroll-behavior: contain;
 
   .providerReadme { margin-bottom: 20px; }
+  .modelSearch { margin-bottom: 12px; }
 
   .modelHeader {
     display: flex;

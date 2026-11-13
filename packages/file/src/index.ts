@@ -21,6 +21,7 @@ export const chmod = promises.chmod;
 export const mkdtemp = promises.mkdtemp;
 export const existsSync = native.existsSync;
 export const statSync = native.statSync;
+export const statfsSync = native.statfsSync;
 export const lstatSync = native.lstatSync;
 export const realpathSync = native.realpathSync;
 export const accessSync = native.accessSync;

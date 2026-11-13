@@ -25,18 +25,18 @@ export function useNodeGeneration(outputs: Readonly<Ref<NodeOutputs>>, cancel: (
     },
   });
 
-  async function run<T>(task: () => Promise<T>): Promise<T> {
+  async function run<T>(task: () => Promise<T>, succeeded: (result: T) => boolean = () => true): Promise<T> {
     if (generating.value) throw new Error("节点正在生成，请等待完成");
     status.value = "running";
     error.value = "";
     try {
       const result = await task();
-      status.value = "succeeded";
+      status.value = succeeded(result) ? "succeeded" : "idle";
       return result;
     } catch (failure) {
       status.value = "failed";
       const message = (failure as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      error.value = failure instanceof Error && failure.name === "AbortError" ? "生成已取消"
+      error.value = failure instanceof Error && failure.name === "AbortError" ? "已停止等待；如已提交，请到生成任务核对后台状态与费用"
         : message || (failure instanceof Error ? failure.message : "生成失败");
       throw failure;
     }

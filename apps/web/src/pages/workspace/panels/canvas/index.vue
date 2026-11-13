@@ -1064,6 +1064,7 @@ provide("workspaceFiles", () => {
   if (!directory) throw new Error("请先选择工作目录");
   return useWorkspaceFiles(directory, project.value?.serverProjectId);
 });
+provide("workspaceProjectId", () => project.value?.serverProjectId);
 provide("workspaceDirectory", () => {
   const directory = project.value?.directory;
   if (!directory) throw new Error("请先选择工作目录");

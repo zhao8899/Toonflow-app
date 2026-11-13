@@ -5,10 +5,11 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { registerApiLanguage } from "@/lib/i18n";
 
 type WorkspaceEntry = { name: string; path: string; type: "file" | "directory" };
+type ReadOptions = { signal?: AbortSignal; timeout?: number };
 export type TextSnapshot = { text: string; revision: string; encoding: "utf-8" | "utf-8-bom" | "utf-16le" | "utf-16be" };
 const client = axios.create({ baseURL: "/api/workspaces/files", headers: { "x-toonflow-workspace": "1" } });
 registerApiLanguage(client);
-const fileUrls = new Map<string, { directory: string; path: string; url: Promise<string>; users: number }>();
+const fileUrls = new Map<string | symbol, { directory: string; path: string; url: Promise<string>; users: number }>();
 
 function cachePath(path: string) {
   return path.replaceAll("\\", "/").split("/").filter(part => part && part !== ".").join("/").toLowerCase();
@@ -41,9 +42,9 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
     return data.data;
   }
 
-  async function read(path: string) {
+  async function read(path: string, options?: ReadOptions) {
     const { directory, headers } = getContext();
-    const { data } = await client.get<ArrayBuffer>("/read", { params: { directory, path }, headers, responseType: "arraybuffer" });
+    const { data } = await client.get<ArrayBuffer>("/read", { params: { directory, path }, headers, responseType: "arraybuffer", signal: options?.signal, timeout: options?.timeout });
     return data;
   }
 
@@ -53,12 +54,13 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
     return data.data;
   }
 
-  function acquireUrl(path: string, mimeType?: string) {
+  function acquireUrl(path: string, mimeType?: string, options?: ReadOptions) {
     const { directory, headers, projectId } = getContext();
-    const key = JSON.stringify([directory, projectId, path, mimeType]);
+    // 显式取消或超时的读取独占请求，避免取消共享 URL 的其他使用者。
+    const key = options ? Symbol() : JSON.stringify([directory, projectId, path, mimeType]);
     let entry = fileUrls.get(key);
     if (!entry) {
-      const url = client.get<Blob>("/read", { params: { directory, path }, headers, responseType: "blob" })
+      const url = client.get<Blob>("/read", { params: { directory, path }, headers, responseType: "blob", signal: options?.signal, timeout: options?.timeout })
         .then(({ data }) => URL.createObjectURL(mimeType ? new Blob([data], { type: mimeType }) : data));
       entry = { directory, path, url, users: 0 };
       fileUrls.set(key, entry);

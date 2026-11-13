@@ -78,6 +78,8 @@ interface FfmpegRequiredError extends Error {
 }
 
 interface ProviderTools {
+  /** 提交成功后立即保存上游任务 ID，供中断或失败后核对；不传密钥或结果链接。 */
+  reportTask?: (id: string) => void;
   fetch: typeof globalThis.fetch;
   /** 提取供应商错误正文中的可读原因，并隐藏配置中的密钥和 URL 查询参数。 */
   errorMessage(value: unknown): string;
@@ -226,6 +228,8 @@ interface ProviderDefinition<TRules extends readonly ProviderFormRule[] = readon
   /** 未实现的方法保持缺省，调用方据此判断能力是否可用。 */
   generateImage?: GenerateMedia<ImageRequest, ProviderConfig<TRules>>;
   generateVideo?: GenerateMedia<VideoRequest, ProviderConfig<TRules>>;
+  /** 仅查询并下载已有视频任务，禁止创建新的生成任务。 */
+  resumeVideo?: (this: ProviderContext<ProviderConfig<TRules>>, taskId: string) => Promise<MediaAsset[]>;
   generateAudio?: GenerateMedia<AudioRequest, ProviderConfig<TRules>>;
   /** 可选的供应商媒体预处理；未实现时保持原请求。 */
   processMedia?: (this: ProviderContext<ProviderConfig<TRules>>, request: ImageRequest | VideoRequest | AudioRequest) => Promise<ImageRequest | VideoRequest | AudioRequest>;

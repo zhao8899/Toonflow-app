@@ -9,5 +9,5 @@ export default Router().post("/", requireAdministrator, validateFields({
 }), async (req, res) => {
   u.mcpControl.assertAppRequest(req);
   const directory = await u.projects.resolveProjectDirectory(req, req.body.directory);
-  res.set("Cache-Control", "no-store").json(success(u.projects.registerProject(directory, req.body.name.trim(), res.locals.userId)));
+  res.set("Cache-Control", "no-store").json(success(u.projects.publicProject(u.projects.registerProject(directory, req.body.name.trim(), res.locals.userId))));
 });

@@ -143,6 +143,7 @@ export function configureAgentRequests(session: AgentSession, limits?: { maxRequ
           }
           const requestContext = {
             ...context,
+            systemPrompt: `${context.systemPrompt ?? ""}\n\n## 输出预算与工具恢复\n当前模型配置的单次最大输出为 ${model.maxTokens} token；思考、正文和工具参数应留有余量。长分镜、剧本或提示词按段写入，不在一次调用中发送全文。每次 nodeTools 必须完整包含 nodeId、name、args，先依据 getNodeTools 的真实 schema 构造；不要仅提交 args。文本节点若提供 appendText，先读取现有正文，使用其真实长度作为 offset，每段最多1200字符，后续使用返回的 length；不得为续写而清空已有成果。工具成功后只简短说明结果，不重复输出完整正文。\n若此前回复被长度限制截断或工具参数校验失败：先检查对应工具结果和当前节点状态，仅修正未执行的调用并缩短参数。输出截断不代表先前成功操作回滚；不得重复删除、创建或付费生成。若缺少目标节点或方法，先查询，禁止猜测。`,
             messages: messages.flatMap((message, index) => {
               if (message.role !== "assistant" || !invalidThinking.has(contentHash(context.messages[index]))) return [message];
               const content = message.content.filter(part => part.type !== "thinking");
@@ -248,6 +249,12 @@ export function configureAgentRequests(session: AgentSession, limits?: { maxRequ
                 });
               }
               const response = await request(input, init);
+              if (response.status === 401 || response.status === 403) {
+                fatalError = { error: new Error(`文本模型请求被供应商拒绝（HTTP ${response.status}，供应商：${model.provider}，模型：${model.id}）。请检查该模型的调用权限、API 密钥及供应商上游通道；能获取模型列表不代表能够生成。修复配置后从已有节点继续，避免重复执行成功操作。`) };
+                const headers = new Headers(response.headers);
+                headers.set("x-should-retry", "false");
+                return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+              }
               if (response.status !== 413) return response;
               http413 = true;
               const headers = new Headers(response.headers);

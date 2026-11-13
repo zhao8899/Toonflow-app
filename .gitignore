@@ -4,6 +4,7 @@ dist/
 /data/
 /work/
 /backup/
+/recovery/
 .playwright-mcp/
 playwright-report/
 test-results/

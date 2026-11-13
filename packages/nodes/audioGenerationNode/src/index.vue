@@ -31,19 +31,20 @@
             filterable
             :loading="modelsLoading"
             :disabled="busy"
-            placeholder="选择模型"
+            placeholder="搜索模型名称或 ID"
             aria-label="音频生成模型"
-            noDataText="请先在设置中添加音频模型"
+            noDataText="请从画布菜单的“模型接入”配置音频平台和模型"
             placement="top-start"
             @visible-change="visible => visible && loadModels().catch(error => showNodeError(error, '模型读取失败'))">
             <template #prefix><icon-music-bolt :size="17" /></template>
             <el-option-group v-for="provider in modelGroups" :key="provider.id" :label="provider.label">
-              <el-option v-for="item in provider.models" :key="item.modelId" :label="item.label" :value="JSON.stringify([item.providerId, item.modelId])" />
+              <el-option v-for="item in provider.models" :key="item.modelId" :label="item.label === item.modelId ? item.label : `${item.label} · ${item.modelId}`" :value="JSON.stringify([item.providerId, item.modelId])" />
             </el-option-group>
           </el-select>
           <generationSettings v-model:language="data.language" v-model:sampleRate="data.sampleRate" v-model:format="data.format" :disabled="busy || !selectedModel" />
           <div class="generationActions">
             <mediaPrice v-if="generationInput" :input="{ ...generationInput, mediaType: 'audio' }" :supported="selectedModel?.supportsPrice === true" />
+            <el-button :disabled="busy" @click="recoverGeneration().catch(error => showNodeError(error, '音频任务核对失败'))">核对并恢复</el-button>
             <el-button
               class="sendButton"
               :icon="generating ? IconPlayerStop : IconArrowUp"
@@ -61,7 +62,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, ref, watch } from "vue";
-import { ElButton, ElCard, ElLoading, ElOption, ElOptionGroup, ElSelect } from "element-plus";
+import { ElButton, ElCard, ElLoading, ElMessage, ElOption, ElOptionGroup, ElSelect } from "element-plus";
 import { IconArrowUp, IconGauge, IconMusicBolt, IconPlayerStop, IconScissors, IconTransfer } from "@tabler/icons-vue";
 import { getTargetValues, isTypeCompatible, nodeSkeleton, nodeTools, useNode, z, type NodeAudioRequest, type NodeHandle, type NodeInputValue, type NodeMediaModel } from "@toonflow/nodes-scaffold/runtime";
 import { groupNodeModels } from "@toonflow/node-shared/groupNodeModels";
@@ -193,6 +194,31 @@ function loadModels() {
   return modelsRequest;
 }
 
+async function recoverGeneration() {
+  if (busy.value || disposed) return;
+  const workspace = files.getWorkspaceFiles();
+  const controller = new AbortController();
+  generationController = controller;
+  generation = generationState.run(async () => {
+    const { directory } = await workspace.list("", AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]));
+    controller.signal.throwIfAborted();
+    const recovered = await ai.recoverMedia(directory, controller.signal);
+    controller.signal.throwIfAborted();
+    if (recovered.state !== "succeeded") {
+      ElMessage.info(recovered.state === "empty" ? "当前节点没有待核对任务，本次没有提交新任务。" : "已核对原请求未生成，可以重新生成；本次没有提交新任务。");
+      return recovered;
+    }
+    const result = recovered.files.find(item => item.mediaType === "audio");
+    if (!result) throw new Error("原任务没有可恢复的音频，请到任务中心查看");
+    outputs.value.audio = { dataType: "AUDIO", value: { url: result.path, mimeType: result.mimeType } };
+    ElMessage.success("已恢复原任务音频，未提交新生成。");
+    return recovered;
+  }, result => result.state === "succeeded").then(() => {}).finally(() => {
+    if (generationController === controller) generationController = undefined;
+  });
+  return generation;
+}
+
 async function startGeneration() {
   if (busy.value || disposed) throw new Error("音频正在处理或节点已关闭，请稍后重试");
   const input = generationInput.value;
@@ -205,7 +231,7 @@ async function startGeneration() {
   const controller = new AbortController();
   generationController = controller;
   generation = generationState.run(async () => {
-    const { directory } = await workspace.list();
+    const { directory } = await workspace.list("", AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]));
     controller.signal.throwIfAborted();
     const [result] = await ai.generateAudio({ ...input, directory }, controller.signal);
     controller.signal.throwIfAborted();

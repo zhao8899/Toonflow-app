@@ -327,6 +327,12 @@ export async function refreshMediaProviderModels(fileName: string, revision?: st
   if (!provider.modelsUrl) invalid("供应商未配置 modelsUrl");
   const apiKey = getMediaProviderApiKey(provider.id);
   if (expectedApiKey !== undefined && apiKey !== expectedApiKey) invalid("供应商配置已变更，请重试", 409);
+  const configuredBaseUrl: unknown = conf.get(`settings.mediaProviderConfigs.${provider.id}.baseUrl`);
+  if (typeof configuredBaseUrl === "string" && configuredBaseUrl.trim()
+    && (!URL.canParse(configuredBaseUrl.trim()) || new URL(configuredBaseUrl.trim()).origin !== new URL(provider.modelsUrl).origin)) {
+    invalid("供应商请求地址与模型目录地址不一致，请先核对配置；未发送 API Key");
+  }
+  const skipped: { id: string; reason: string }[] = [];
   const modelTypes = provider.id === tfRouter.id && !modelType ? ["video", "image", "audio"] : [modelType];
   // ACT: 各类型只并行获取，汇总后保存一次，避免同一供应商文件发生版本冲突。
   const models = (await Promise.all(modelTypes.map(async requestedModelType => {
@@ -338,6 +344,7 @@ export async function refreshMediaProviderModels(fileName: string, revision?: st
     });
     if (!response.ok) throw new Error(t`获取媒体模型列表失败（HTTP ${response.status}）`);
     const result = z.object({ data: z.array(mediaModelsSchema.element.partial({ label: true, type: true }).extend({
+      type: z.string().optional(),
       modelInfo: z.object({
         mode: z.array(z.union([z.string().min(1), z.array(z.string().min(1))])).optional(),
         audio: z.union([z.literal("optional"), z.boolean()]).optional(),
@@ -347,23 +354,44 @@ export async function refreshMediaProviderModels(fileName: string, revision?: st
       }).catchall(z.json()).optional(),
     })).max(2000) }).parse(await response.json());
     if (!result.data.length) throw new Error("未获取到媒体模型，保留原有列表");
+    if (new Set(result.data.map(model => model.id.trim())).size !== result.data.length) invalid("模型目录 ID 不能重复，保留原有列表");
     const requestedType = z.enum(["text", "image", "video", "audio"]).safeParse(modelsUrl.searchParams.get("type"));
-    return result.data.map(({ modelInfo, ...model }) => {
+    return result.data.flatMap(({ modelInfo, ...model }) => {
       const id = model.id.trim();
       const previous = provider.models.find(item => item.id === id)
         ?? (provider.id === tfRouter.id ? tfRouter.models.find(item => item.id === id) : undefined);
-      const type = model.type ?? (requestedType.success ? requestedType.data : previous?.type);
-      if (!type) invalid(t`模型 ${id} 缺少 type，请在返回数据或 modelsUrl 的 type 参数中指定`);
-      if (requestedType.success && type !== requestedType.data) invalid(t`模型 ${id} 的 type 与请求类型不一致`);
-      // ACT: modelInfo 覆盖已有能力；缺省字段沿用同名配置，新模型不猜测生成能力。
-      const merged = { ...previous, ...model, ...modelInfo, id, label: model.label ?? previous?.label
+      const type = model.type ?? previous?.type;
+      const reason = !type ? "缺少明确类型及已有配置，未推测生成能力"
+        : !["image", "video", "audio"].includes(type) ? "不是支持的媒体类型"
+          : previous && model.type && model.type !== previous.type ? "目录类型与已有配置不一致"
+            : requestedType.success && type !== requestedType.data ? "与请求的媒体类型不匹配" : "";
+      if (reason) { skipped.push({ id, reason }); return []; }
+      // ACT: 刷新只补充信息，不覆盖用户已有配置；请求参数和 endpoint 标签都不能证明新模型能力。
+      const merged = { ...model, ...modelInfo, ...previous, id, label: previous?.label ?? model.label
         ?? (typeof model.display_name === "string" ? model.display_name : typeof model.displayName === "string" ? model.displayName : id), type };
       Reflect.deleteProperty(merged, "modelInfo");
-      return merged;
+      if (!previous && type === "video" && !z.object({
+        mode: z.array(z.union([z.string().min(1), z.array(z.string().min(1)).min(1)])).min(1),
+        audio: z.union([z.literal("optional"), z.boolean()]),
+        durationResolutionMap: z.array(z.object({ duration: z.array(z.number().positive()).min(1), resolution: z.array(z.string().min(1)).min(1) })).min(1),
+      }).safeParse(merged).success) {
+        skipped.push({ id, reason: "新视频模型缺少明确模式、时长分辨率或音频能力，保留人工配置" });
+        return [];
+      }
+      return [mediaModelsSchema.element.parse(merged)];
     });
   }))).flat();
-  const types = new Set(models.map(model => model.type));
-  return saveMediaProvider(fileName, [...provider.models.filter(model => !types.has(model.type)), ...models], provider.revision, apiKey);
+  const importedIds = new Set(models.map(model => model.id));
+  const combined = [...provider.models.filter(model => !importedIds.has(model.id)), ...models];
+  const refreshSummary = { imported: models.length,
+    skipped: [...new Map(skipped.filter(item => !importedIds.has(item.id)).map(item => [item.id, item])).values()],
+    preserved: provider.models.length };
+  if (!models.length) {
+    const current = await getMediaProvider(provider.id);
+    if (current.revision !== provider.revision || getMediaProviderApiKey(provider.id) !== apiKey) invalid("供应商配置已变更，请重试", 409);
+    return { ...metadata(fileName, provider.source), refreshSummary };
+  }
+  return { ...await saveMediaProvider(fileName, combined, provider.revision, apiKey), refreshSummary };
 }
 
 export async function deleteMediaProvider(fileName: string, revision: string) {
@@ -413,6 +441,7 @@ export async function loadMediaProviderSource(source: string, config: Record<str
     config: providerConfig,
     signal,
     tool: {
+      reportTask: undefined as ProviderTools["reportTask"],
       fetch: signal ? Object.assign((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
         signal.throwIfAborted();
         const requestSignal = init?.signal === null ? undefined : init?.signal ?? (input instanceof Request ? input.signal : undefined);
@@ -491,6 +520,15 @@ export async function loadMediaProviderSource(source: string, config: Record<str
         throw Object.assign(new Error(message), typeof error === "object" ? error : undefined, { message, cause: error });
       }
     } });
+  }
+  if (definition.resumeVideo) {
+    provider.resumeVideo = taskId => definition.resumeVideo!.call({ ...provider, tool: { ...provider.tool,
+      fetch: Object.assign((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+        if (!["GET", "HEAD"].includes(method)) throw new Error("续查仅允许读取已有任务，不能提交新的生成请求");
+        return provider.tool.fetch(input, init);
+      }, { preconnect: provider.tool.fetch.preconnect }) as typeof fetch,
+    } }, taskId);
   }
   return provider;
 }

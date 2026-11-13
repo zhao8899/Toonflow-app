@@ -255,14 +255,32 @@ const promptModel = computed({ get: () => data.value.promptModel ?? [], set: (va
 
 nodeTools.register({
   name: "setText",
-  description: "修改此节点的文本输出",
+  description: "覆盖此节点的文本输出。长文本先写首段，再通过 appendText 分段追加；不要反复覆盖已保存的全文。",
   parameters: z.strictObject({ text: z.string() }),
   async execute({ text }) {
     if (!textReady.value) throw new Error("文本尚未加载");
     if (generating.value) throw new Error("文本生成中，请稍后修改");
     if (outputs.value.text.value === text) await saveText(text);
     else { outputs.value.text.value = text; await textSaving; }
-    return { text };
+    return { text, length: text.length };
+  },
+});
+nodeTools.register({
+  name: "appendText",
+  description: "分段追加文本。offset 是追加前正文的 JavaScript 字符串长度，首次追加前须读取节点现有正文；后续使用返回的 length。同一 offset 和 text 立即重试不会重复追加，正文长度不匹配时拒绝。每段最多1200个字符。",
+  parameters: z.strictObject({ offset: z.number().int().nonnegative(), text: z.string().min(1).max(1200) }),
+  async execute({ offset, text }) {
+    if (!textReady.value) throw new Error("文本尚未加载");
+    if (generating.value) throw new Error("文本生成中，请稍后修改");
+    const current = outputs.value.text.value;
+    if (current.length === offset + text.length && current.slice(offset) === text) {
+      await saveText(current);
+      return { length: current.length, appended: false };
+    }
+    if (current.length !== offset) throw new Error("节点正文已变化，请重新读取正文及长度，不要盲目重试追加");
+    outputs.value.text.value = current + text;
+    await textSaving;
+    return { length: offset + text.length, appended: true };
   },
 });
 </script>

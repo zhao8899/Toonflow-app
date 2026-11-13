@@ -27,12 +27,12 @@ export const settingsStorage = {
   },
 };
 
-export const defaultUiSettings = { theme: "dark", language: "system", primaryColor: "#409eff", fontScale: 100, mobileScale: 75, radius: 8, startupAnimation: true };
+export const defaultUiSettings = { theme: "dark", language: "zh-CN", primaryColor: "#409eff", fontScale: 100, mobileScale: 75, radius: 8, startupAnimation: true };
 export const uiSettings = computed(() => {
   const raw = settings.value.ui;
   const ui = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   return {
-    language: normalizeLocale(ui.language) ?? "system" as const,
+    language: normalizeLocale(ui.language) === "en" ? "en" as const : "zh-CN" as const,
     theme: ui.theme === "light" || ui.theme === "system" ? ui.theme : "dark",
     primaryColor: typeof ui.primaryColor === "string" && /^#[\da-f]{6}$/i.test(ui.primaryColor) ? ui.primaryColor : defaultUiSettings.primaryColor,
     fontScale: typeof ui.fontScale === "number" && Number.isFinite(ui.fontScale) ? Math.min(125, Math.max(85, ui.fontScale)) : defaultUiSettings.fontScale,

@@ -6,7 +6,7 @@
         <sessionMenu />
       </div>
     </header>
-    <p class="portalNote">成员账号可查看已加入项目的生成任务、下载结果并提交审片意见；发起生成与全局设置由管理员负责。</p>
+    <p class="portalNote">成员账号可查看已加入项目的生成任务、下载结果并提交审片意见；管理员授权后可生成视频，费用由实例供应商账户承担。</p>
     <div class="portalToolbar">
       <span>共 {{ total }} 个项目</span>
       <el-button :loading="loading" @click="refresh += 1">刷新</el-button>
@@ -15,6 +15,7 @@
     <p v-else-if="!loading && !projects.length">尚未加入任何项目，请联系管理员添加。</p>
     <article v-for="item in projects" :key="item.id" class="projectItem">
       <strong>{{ item.name }}</strong>
+      <el-button v-if="item.memberGenerationEnabled" :disabled="!!opening || generationVisible" @click="open(item.id, true)">生成视频</el-button>
       <el-button type="primary" :loading="opening === item.id" :disabled="!!opening" @click="open(item.id)">查看生成任务</el-button>
     </article>
     <div class="portalPagination">
@@ -23,6 +24,8 @@
       <el-button :disabled="offset + pageSize >= total || loading" @click="offset += pageSize">下一页</el-button>
     </div>
     <mediaTasks v-model="tasksVisible" />
+    <el-button v-if="hasPendingGeneration" :disabled="!!opening" @click="generationVisible = true">查询待确认的视频提交</el-button>
+    <videoGeneration v-model="generationVisible" :project="generationProject" @pendingChange="hasPendingGeneration = $event" @submitted="open" />
   </main>
 </template>
 
@@ -33,8 +36,9 @@ import { ElMessage } from "element-plus";
 import { useWorkspaceStore } from "@/stores/workspace";
 import sessionMenu from "@/components/sessionMenu.vue";
 import mediaTasks from "@/pages/workspace/components/mediaTasks.vue";
+import videoGeneration from "./videoGeneration.vue";
 
-type MemberProject = { id: string; name: string };
+type MemberProject = { id: string; name: string; memberGenerationEnabled?: boolean };
 const workspaceStore = useWorkspaceStore();
 const projects = ref<MemberProject[]>([]);
 const total = ref(0);
@@ -45,17 +49,24 @@ const loading = ref(false);
 const errorMessage = ref("");
 const opening = ref("");
 const tasksVisible = ref(false);
+const generationVisible = ref(false);
+const hasPendingGeneration = ref(false);
+const generationProject = ref<{ id: string; directory: string }>();
 
 function message(error: unknown) {
   return axios.isAxiosError<{ message?: string }>(error) ? error.response?.data?.message || error.message
     : error instanceof Error ? error.message : "操作失败";
 }
 
-async function open(id: string) {
+async function open(id: string, generate = false) {
+  if (opening.value || generationVisible.value) return;
   opening.value = id;
   try {
     await workspaceStore.openServerProject(id);
-    tasksVisible.value = true;
+    if (generate) {
+      generationProject.value = { id, directory: workspaceStore.project!.directory };
+      generationVisible.value = true;
+    } else tasksVisible.value = true;
   } catch (error) { ElMessage.error(message(error)); }
   finally { opening.value = ""; }
 }
@@ -69,7 +80,12 @@ watch([offset, refresh], async (_value, _previous, onCleanup) => {
     const { data } = await axios.get<{ code: number; message: string; data: { projects: MemberProject[]; total: number } }>("/api/projects/list", {
       params: { offset: offset.value, limit: pageSize }, headers: { "x-toonflow-workspace": "1" }, signal: controller.signal, timeout: 15000,
     });
+    if (controller.signal.aborted) return;
     if (data.code !== 200) throw new Error(data.message);
+    if (offset.value > 0 && offset.value >= data.data.total) {
+      offset.value = Math.max(0, Math.ceil(data.data.total / pageSize) - 1) * pageSize;
+      return;
+    }
     projects.value = data.data.projects;
     total.value = data.data.total;
   } catch (error) { if (!controller.signal.aborted) errorMessage.value = message(error); }

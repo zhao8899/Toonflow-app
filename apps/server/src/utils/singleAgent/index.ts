@@ -281,7 +281,7 @@ export async function run(options: {
     const reply = session.messages.findLast(message => message.role === "assistant");
     if (!reply || reply.role !== "assistant") throw new Error("模型未返回回复");
     if (reply.stopReason === "error" || reply.stopReason === "aborted") throw new Error(reply.errorMessage || "模型请求失败");
-    if (reply.stopReason === "length") throw new Error("模型回复因长度限制被截断，未能完整生成回答。");
+    if (reply.stopReason === "length") throw new Error("本次回复达到模型输出长度上限。已完成的工具操作不会自动回滚；请先检查节点内容，再要求分段继续未完成部分，避免重复创建或生成。");
     send({ type: "complete", text: reply.content.filter(part => part.type === "text").map(part => part.text).join("\n"), toolResults });
   } catch (error) {
     send({ type: "error", message: active.controller.signal.aborted ? "本次回复已停止" : error instanceof Error ? error.message : "临时对话执行失败" });

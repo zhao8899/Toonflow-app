@@ -15,6 +15,7 @@
         <el-form-item label="模型 ID" required>
           <el-input v-model="draft.id" clearable aria-label="模型 ID" />
         </el-form-item>
+        <el-alert v-if="model && draft.id.trim() !== model.id.trim()" title="模型 ID 已改变，请重新核对能力参数" description="下方仍保留原参数，不能据此认定新型号支持相同能力。请以平台提供的准确 ID、模式和参数范围为准。" type="warning" :closable="false" />
         <el-form-item label="模型类型">
           <el-select v-model="draft.type" aria-label="模型类型">
             <el-option v-if="model?.type === 'text'" value="text" label="文本（旧配置）" disabled />
@@ -27,6 +28,7 @@
           </el-checkbox-group>
         </el-form-item>
         <template v-if="draft.type === 'video'">
+          <p>请按平台针对该模型提供的说明填写模式、音频及每组时长与分辨率。目录列出模型不代表这些能力已确认，不要照搬其他型号。</p>
           <el-form-item label="视频生成模式" required>
             <div class="videoModes">
               <el-checkbox-group v-model="draft.videoMode">
@@ -48,7 +50,7 @@
               </el-checkbox-group>
             </div>
           </el-form-item>
-          <el-form-item label="音频输出">
+          <el-form-item label="音频输出（按平台说明选择）" required>
             <el-radio-group v-model="draft.audio">
               <el-radio value="optional">可选音频</el-radio>
               <el-radio :value="true">始终输出音频</el-radio>
@@ -132,7 +134,7 @@ function createDraft() {
     id: "", label: "", type: "image" as MediaProviderModel["type"],
     imageMode: [] as string[], videoMode: [] as string[], mixedMode: [] as string[],
     mixedModeCount: { videoReference: 1, imageReference: 1, audioReference: 1 } as Record<string, number | undefined>,
-    audio: "optional" as "optional" | boolean,
+    audio: undefined as "optional" | boolean | undefined,
     durationResolutionMap: [{ duration: [] as string[], resolution: [] as string[] }],
   };
 }
@@ -167,7 +169,7 @@ watch(visible, (isVisible) => {
     else delete extra.mode;
   }
   if (draft.value.type === "video") {
-    draft.value.audio = typeof extra.audio === "boolean" ? extra.audio : "optional";
+    draft.value.audio = typeof extra.audio === "boolean" || extra.audio === "optional" ? extra.audio : undefined;
     if (Array.isArray(extra.durationResolutionMap) && extra.durationResolutionMap.length) {
       draft.value.durationResolutionMap = extra.durationResolutionMap.map(row => ({
         duration: Array.isArray(row?.duration) ? row.duration.map(String) : [],
@@ -216,7 +218,10 @@ function confirmModel() {
       if (!modes.length) throw new Error("请至少选择一种生成模式");
       value.mode = modes;
     }
-    if (value.type === "video" && changed("audio")) value.audio = draft.value.audio;
+    if (value.type === "video" && changed("audio")) {
+      if (draft.value.audio === undefined) throw new Error("请按平台说明选择音频输出能力；未知时请先核实，不要猜测");
+      value.audio = draft.value.audio;
+    }
     if (value.type === "video" && changed("durationResolutionMap")) {
       if (!draft.value.durationResolutionMap.length) throw new Error("请至少添加一组时长与分辨率");
       value.durationResolutionMap = draft.value.durationResolutionMap.map((row, index) => {

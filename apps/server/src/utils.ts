@@ -1,4 +1,5 @@
 import * as assets from "@/utils/assets";
+import * as activity from "@/utils/activity";
 import * as browser from "@/utils/browser";
 import * as singleAgent from "@/utils/singleAgent";
 import * as desktop from "@/utils/desktop";
@@ -36,6 +37,7 @@ import * as providerConfig from "@/utils/user/providerConfig";
 import * as userAccess from "@/utils/user/access";
 
 export default {
+  activity,
   assets,
   browser,
   singleAgent,

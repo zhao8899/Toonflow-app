@@ -20,6 +20,11 @@
       @ended="playing = false"
       @volumechange="readVolume"
       @error="mediaError" />
+    <button v-if="!playing && !fullscreen" class="centerPlay nodrag nopan" type="button" :disabled="!ready && !playError"
+      @pointerdown.stop @mousedown.stop @dblclick.stop @click.stop="playError ? reloadVideo() : togglePlayback()">
+      {{ playError ? '重新加载视频' : ready ? '▶ 播放视频' : '视频加载中…' }}
+    </button>
+    <p v-if="playError" class="playError" role="alert">{{ playError }}</p>
     <div v-show="!fullscreen" class="playerControls nodrag nopan nowheel" @pointerdown.stop @mousedown.stop @dblclick.stop @keydown.stop>
       <el-button class="playerButton playButton" text circle :icon="playing ? IconPlayerPause : IconPlayerPlay" :disabled="!ready" :aria-label="playing ? '暂停视频' : '播放视频'" :title="playing ? '暂停' : '播放'" @click="togglePlayback" />
       <span class="currentTime">{{ formatTime(currentTime) }}</span>
@@ -64,6 +69,11 @@ const fullscreen = ref(false);
 const ready = ref(false);
 const poster = ref("");
 const playing = ref(false);
+const playError = ref("");
+function reloadVideo() {
+  playError.value = "";
+  video.value?.load();
+}
 const muted = ref(false);
 const volume = ref(100);
 let lastVolume = 100;
@@ -81,6 +91,7 @@ watch(() => getCanvas?.()?.id, () => captureController?.abort(), { flush: "sync"
 watch(() => src, () => {
   captureController?.abort();
   ready.value = false;
+  playError.value = "";
   poster.value = "";
   playing.value = false;
   currentTime.value = 0;
@@ -133,6 +144,7 @@ function readPreview(event: Event) {
 }
 
 function mediaError() {
+  playError.value = "视频加载失败，可重新加载；不会重新生成或扣费。";
   ready.value = false;
   playing.value = false;
   ElMessage.error("无法预览该视频");
@@ -365,6 +377,14 @@ async function captureFrame(command: "current" | "first" | "last") {
     }
     @media (prefers-reduced-motion: reduce) { transition: none; }
   }
+  .centerPlay {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    min-height: 44px; padding: 10px 20px; border-radius: 24px; border: 1px solid #ffffff80;
+    color: white; background: #000b; cursor: pointer; z-index: 2;
+    &:focus-visible { outline: 3px solid var(--el-color-primary); outline-offset: 3px; }
+    &:disabled { cursor: wait; }
+  }
+  .playError { position: absolute; bottom: 44px; left: 8px; right: 8px; color: white; background: #000b; padding: 8px; }
   &:hover .playerControls, .playerControls:has(:focus-visible) {
     opacity: 1;
     pointer-events: auto;

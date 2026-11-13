@@ -5,7 +5,7 @@
         <h3 id="mcpEnabledTitle">开启 MCP</h3>
         <el-switch :modelValue="mcpSettings.enabled" :loading="saving" aria-label="开启 MCP" @change="(value) => setEnabled(value === true)" />
       </div>
-      <p class="description">允许外部 Coding 工具和 Agent 操作 Toonflow。开启后，将客户端配置添加到对应工具中。</p>
+      <p class="description">允许外部 Coding 工具和 Agent 操作 DCtiv。开启后，将客户端配置添加到对应工具中。</p>
     </section>
 
     <section class="settingSection" aria-labelledby="mcpConnectionTitle">
@@ -26,7 +26,7 @@
           </li>
         </ul>
       </template>
-      <p class="description">画布与节点操作需要 Toonflow 界面保持打开。</p>
+      <p class="description">画布与节点操作需要 DCtiv 界面保持打开。</p>
     </section>
 
     <section class="settingSection" aria-labelledby="mcpEndpointTitle">
@@ -49,8 +49,17 @@
     </section>
 
     <section class="settingSection" aria-labelledby="mcpSkillTitle">
-      <h3 id="mcpSkillTitle">Toonflow Skill</h3>
-      <p class="description">教外部 Agent 组合使用 Toonflow 工具。将 SKILL.md 安装到对应 Coding 工具的技能目录。</p>
+      <h3 id="mcpSkillTitle">DCtiv Skill</h3>
+      <el-select v-model="skillSource" aria-label="技能来源">
+        <el-option label="内置技能" value="builtin" /><el-option label="自定义内容" value="custom" /><el-option label="已安装技能（含市场安装）" value="installed" />
+      </el-select>
+      <el-input v-if="skillSource === 'custom'" v-model="customSkill" type="textarea" :rows="10" :maxlength="100000" aria-label="自定义技能内容" />
+      <el-select v-if="skillSource === 'installed'" v-model="installedSkill" filterable aria-label="已安装技能" @visibleChange="loadSkills">
+        <el-option v-for="item in availableSkills" :key="item.name" :label="item.displayName || item.name" :value="item.name" />
+      </el-select>
+      <el-button :loading="savingSkill" @click="saveSkillSource">保存技能来源</el-button>
+      <p class="description">可在插件市场安装技能，也可粘贴自有 SKILL.md 内容。保存后查看、复制和导出使用所选来源。</p>
+      <p class="description">教外部 Agent 组合使用 DCtiv 工具。将 SKILL.md 安装到对应 Coding 工具的技能目录。</p>
       <div class="actions">
         <el-button :icon="IconFileText" :loading="skillAction === 'view'" :disabled="!!skillAction" @click="handleSkill('view')">查看 Skill</el-button>
         <el-button :icon="IconCopy" :loading="skillAction === 'copy'" :disabled="!!skillAction" @click="handleSkill('copy')">复制</el-button>
@@ -58,7 +67,7 @@
       </div>
     </section>
 
-    <el-dialog v-model="skillVisible" title="Toonflow Skill" width="min(760px, calc(100vw - 32px))" alignCenter appendToBody>
+    <el-dialog v-model="skillVisible" title="DCtiv Skill" width="min(760px, calc(100vw - 32px))" alignCenter appendToBody>
       <div class="skillContent"><messageMarkdown :content="skillContent" /></div>
     </el-dialog>
     <el-dialog v-model="copyVisible" :title="`复制 ${copyTitle}`" width="min(680px, calc(100vw - 32px))" alignCenter appendToBody @opened="copyInput?.select()">
@@ -105,6 +114,21 @@ const statusError = ref("");
 const loading = ref(false);
 const saving = ref(false);
 const skillContent = ref("");
+const savedSkill = settings.value.mcpSkill as { source?: string; content?: string; name?: string } | undefined;
+const skillSource = ref(savedSkill?.source ?? "builtin"), customSkill = ref(savedSkill?.content ?? ""), installedSkill = ref(savedSkill?.name ?? "");
+const availableSkills = ref<{ name: string; displayName?: string }[]>([]);
+const savingSkill = ref(false);
+async function loadSkills() {
+  try { const { data } = await axios.get("/api/skills/get", { headers }); availableSkills.value = data.data; }
+  catch (error) { ElMessage.error(errorMessage(error)); }
+}
+async function saveSkillSource() {
+  if (skillSource.value === "custom" && !customSkill.value.trim() || skillSource.value === "installed" && !installedSkill.value) return void ElMessage.error("请填写内容或选择技能");
+  savingSkill.value = true;
+  try { await saveSettings(() => ({ mcpSkill: { source: skillSource.value, content: customSkill.value, name: installedSkill.value } })); skillContent.value = ""; ElMessage.success("技能来源已保存"); }
+  catch (error) { ElMessage.error(errorMessage(error)); }
+  finally { savingSkill.value = false; }
+}
 const skillVisible = ref(false);
 const skillAction = ref<"view" | "copy" | "download" | "">("");
 const copyVisible = ref(false);
@@ -203,7 +227,7 @@ async function handleSkill(action: "view" | "copy" | "download") {
       await saveFile(readSkill, "SKILL.md");
       return;
     }
-    skillContent.value ||= await (await readSkill()).text();
+    skillContent.value = await (await readSkill()).text();
     if (action === "view") skillVisible.value = true;
     else await copyText(skillContent.value, "Skill");
   } catch (error) {

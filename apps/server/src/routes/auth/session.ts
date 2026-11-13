@@ -8,7 +8,7 @@ const router = Router();
 router.get("/", requireAuth, (_req, res) => {
   const user = u.userManager.getUserById(res.locals.userId)!;
   res.setHeader("Cache-Control", "no-store");
-  res.json(success({ username: user.username, role: user.role }));
+  res.json(success({ id: user.id, username: user.username, role: user.role }));
 });
 
 export default router;

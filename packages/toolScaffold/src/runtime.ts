@@ -130,6 +130,13 @@ export interface MediaTaskFilters {
 }
 
 export interface MediaTask {
+  promptHash?: string;
+  request?: Record<string, unknown>;
+  timeline?: { status: string; at: number }[];
+  completedAt?: number;
+  createdBy?: { id: string; username: string };
+  billingOwner?: "instance";
+  memberRequest?: boolean;
   id: string;
   projectId?: string;
   mediaType: "image" | "video" | "audio";
@@ -137,6 +144,8 @@ export interface MediaTask {
   modelId: string;
   status: "queued" | "running" | "saving" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted";
   billingState: "notSubmitted" | "providerManaged" | "unknown";
+  providerTaskId?: string;
+  canResume?: boolean;
   createdAt: number;
   updatedAt: number;
   files: GeneratedMedia[];

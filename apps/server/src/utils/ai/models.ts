@@ -6,6 +6,7 @@ const modelSchema = z.object({
   display_name: z.string().optional(), displayName: z.string().optional(),
   inputTokenLimit: z.number().int().positive().optional(),
   outputTokenLimit: z.number().int().positive().optional(),
+  supported_endpoint_types: z.array(z.string()).optional(),
 });
 
 export async function fetchProviderModels({ apiUrl, protocol, apiKey }: { apiUrl: string; protocol: string; apiKey: string }) {
@@ -33,6 +34,8 @@ export async function fetchProviderModels({ apiUrl, protocol, apiKey }: { apiUrl
     for (const item of items) {
       const id = item.id?.trim();
       if (!id) throw new Error("模型列表包含无效的模型 ID");
+      // ACT: 仅排除平台明确声明只支持视频端点的条目；未知元数据保留，不能按模型名称猜测能力。
+      if (item.supported_endpoint_types?.length && item.supported_endpoint_types.every(type => type === "openai-video")) continue;
       models.set(id, { id, label: item.display_name || item.displayName || id, contextWindow: item.inputTokenLimit, maxOutputTokens: item.outputTokenLimit });
     }
     const cursor = protocol === "anthropic-messages" && result.has_more ? result.last_id : undefined;

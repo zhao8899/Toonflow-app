@@ -1,7 +1,7 @@
 <template>
   <main class="loginPage">
     <form class="loginForm" @submit.prevent="login">
-      <h1>登录 Toonflow</h1>
+      <h1>登录 DCtiv</h1>
       <p>使用管理员账号进入工作台</p>
       <label for="loginUsername">用户名</label>
       <input id="loginUsername" v-model="username" name="username" autocomplete="username" required maxlength="20" :disabled="pending" autofocus />

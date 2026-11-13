@@ -9,6 +9,9 @@ import { t } from "@/lib/i18n";
 const router = Router();
 
 export default router.put("/", validateFields({ settings: z.record(z.string(), z.json()).and(z.object({
+  pluginMarketApiKey: z.string().max(4096).optional(),
+  mcpSkill: z.object({ source: z.enum(["builtin", "custom", "installed"]), content: z.string().max(100000).optional(), name: z.string().max(1024).optional() }).refine(value => value.source !== "custom" || !!value.content?.trim()).refine(value => value.source !== "installed" || !!value.name?.trim()).optional(),
+  promptEnhancementModel: z.strictObject({ providerId: z.string().min(1).max(200), modelId: z.string().min(1).max(200), imageInput: z.boolean().optional(), videoInput: z.boolean().optional() }).nullable().optional(),
   agentSystemPrompt: z.string().max(maxSystemPromptLength, { error: () => t`系统提示词不能超过 ${maxSystemPromptLength} 个字符` }).optional(),
   desktopUpdateSource: z.enum(["official", "github", "custom"]).optional(),
   desktopUpdateCustomUrl: z.string().max(2048).refine(value => !value || u.desktop.isValidUpdateUrl(value),

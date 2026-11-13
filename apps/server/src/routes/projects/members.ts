@@ -10,5 +10,5 @@ export default Router().put("/", requireAdministrator, validateFields({
   u.mcpControl.assertAppRequest(req);
   const project = u.projects.setProjectMembers(req.body.id, req.body.members,
     userId => u.userManager.getUserById(userId)?.role === u.userTypes.UserRole.user);
-  res.set("Cache-Control", "no-store").json(success(project));
+  res.set("Cache-Control", "no-store").json(success(u.projects.publicProject(project)));
 });

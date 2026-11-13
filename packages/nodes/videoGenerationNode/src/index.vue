@@ -51,6 +51,13 @@
           {{ selectedMode === "startFrameOptional" ? "仅一张图片时作为尾帧；两张图片按顺序作为首帧、尾帧" : "图片引用按顺序作为首帧、尾帧" }}
         </div>
         <promptInput v-model="data.promptModel" v-model:text="data.prompt" :references="referenceMentions" expandable />
+        <div class="promptAssistance">
+          <el-button text :loading="enhancingPrompt" :disabled="!!enhancementDisabledReason || enhancingPrompt" @click="improvePrompt">帮我完善</el-button>
+          <el-button v-if="originalPrompt" text :disabled="generating || deleting || enhancingPrompt" @click="restorePrompt">恢复原文</el-button>
+          <p class="referenceHint">可选辅助会调用已配置的文本模型，可能产生费用。请审阅完善结果后再生成。</p>
+          <p v-if="enhancementDisabledReason" class="referenceHint">{{ enhancementDisabledReason }}</p>
+          <p v-if="enhancementMessage" class="referenceHint" role="status">{{ enhancementMessage }}</p>
+        </div>
         <div class="promptFooter">
           <el-select
             v-model="data.model"
@@ -58,9 +65,9 @@
             filterable
             :loading="modelsLoading"
             :disabled="generating || deleting"
-            placeholder="选择模型"
+            placeholder="搜索模型名称或 ID"
             aria-label="生成模型"
-            noDataText="请先在设置中添加视频模型"
+            noDataText="请从画布菜单的“模型接入”配置视频平台和模型"
             placement="top-start"
             @visible-change="(visible) => visible && loadModels().catch((error) => showNodeError(error, '模型读取失败'))">
             <template #prefix><icon-sparkles :size="17" /></template>
@@ -68,7 +75,7 @@
               <el-option
                 v-for="item in provider.models"
                 :key="item.modelId"
-                :label="item.label"
+                :label="item.label === item.modelId ? item.label : `${item.label} · ${item.modelId}`"
                 :value="JSON.stringify([item.providerId, item.modelId])" />
             </el-option-group>
           </el-select>
@@ -80,18 +87,22 @@
             v-model:generateAudio="data.generateAudio"
             :ratios="ratioOptions"
             :model="selectedModel"
+            :availableModes="matchingModes"
             :disabled="generating || deleting || !selectedModel" />
           <div class="generationActions">
             <mediaPrice v-if="generationInput" :input="{ ...generationInput, mediaType: 'video' }" :supported="selectedModel?.supportsPrice === true" />
             <el-button
               class="sendButton"
               :icon="generating ? IconPlayerStop : IconArrowUp"
-              :disabled="deleting || uploading || (!generating && (!generationPrompt || !selectedModel))"
+              :disabled="deleting || uploading || (!generating && (!generationPrompt || !!generationDisabledReason))"
               :title="generating ? '停止生成' : '生成视频'"
               :aria-label="generating ? '停止生成' : '生成视频'"
               @click="generating ? generationController?.abort() : startGeneration().catch((error) => showNodeError(error, '视频生成失败'))" />
           </div>
         </div>
+        <p v-if="generationDisabledReason" class="referenceHint" role="status">{{ generationDisabledReason }}</p>
+        <el-button text :disabled="generating || deleting || uploading" @click="recoverGeneration">核对并恢复</el-button>
+        <p v-if="recoveryMessage" class="referenceHint" role="status">{{ recoveryMessage }}</p>
       </el-card>
     </template>
   </nodeSkeleton>
@@ -99,10 +110,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from "vue";
+import { computed, inject, nextTick, onMounted, onScopeDispose, ref, watch } from "vue";
 import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElDropdown, ElDropdownMenu, ElDropdownItem } from "element-plus";
 import { IconCameraAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconMusic, IconLayersSubtract, IconScissors, IconPhotoScan, IconPlayerSkipBack, IconPlayerSkipForward } from "@tabler/icons-vue";
 import { nodeSkeleton, nodeTools, useNode, z, type NodeMediaModel, type NodeVideoRequest, type NodeHandle } from "@toonflow/nodes-scaffold/runtime";
+import { enhanceVideoPrompt, recordPromptAction } from "@toonflow/node-shared/videoPromptAssistant";
 import { groupNodeModels } from "@toonflow/node-shared/groupNodeModels";
 import { showNodeError } from "@toonflow/node-shared/showNodeError";
 import { useNodeGeneration } from "@toonflow/node-shared/useNodeGeneration";
@@ -149,6 +161,7 @@ const videoWidth = ref(0);
 let generationController: AbortController | undefined;
 const generationState = useNodeGeneration(outputs, () => generationController?.abort());
 const { generating } = generationState;
+const recoveryMessage = ref("");
 let generation: Promise<void> | undefined;
 let modelsRequest: Promise<void> | undefined;
 // ACT: 供应商未声明视频比例范围，沿用界面的通用比例，具体支持范围由供应商校验。
@@ -162,6 +175,131 @@ const mediaCounts = computed(() => ({
   audio: refList.value.filter((item) => item.dataType === "AUDIO").length,
 }));
 const matchingModes = computed(() => getMatchingModes(selectedModel.value));
+
+const getWorkspaceDirectory = inject<(() => string) | undefined>("workspaceDirectory", undefined);
+function currentWorkspaceDirectory() {
+  try { return getWorkspaceDirectory?.() ?? ""; } catch { return ""; }
+}
+const enhancingPrompt = ref(false);
+const enhancementMessage = ref("");
+const originalPrompt = ref<{ prompt: string; promptModel: PromptModel }>();
+let assistanceId: string | undefined;
+function logPromptAction(action: "promptApplied" | "promptRestored") {
+  void recordPromptAction({ directory: currentWorkspaceDirectory(), action, prompt: data.value.prompt, assistanceId })
+    .catch(error => { if (!disposed) enhancementMessage.value = error.message; });
+}
+let enhancementController: AbortController | undefined;
+const enhancementDisabledReason = computed(() => {
+  if (refList.value.some(item => item.dataType === "AUDIO")) return "提示词完善暂不支持音频引用，请移除音频引用或直接生成。";
+  if (refList.value.some(item => item.value === undefined)) return "引用节点暂无内容，请先补充引用内容。";
+  if (refList.value.some(item => !["STRING", "IMAGE", "VIDEO"].includes(String(item.dataType)))) return "提示词完善仅支持文字、图片和视频引用。";
+  if ([...(data.value.prompt.match(/\{\{ref\s+\d+\}\}/g) ?? [])].some(token => {
+    const index = Number(token.match(/\d+/)![0]);
+    return index < 1 || index > refList.value.length;
+  })) return "提示词引用编号不存在，请重新插入引用。";
+  if (data.value.promptModel.some(line => line.some(tag => {
+    if (tag.type === "Write") return false;
+    if (tag.type !== "Custom") return true;
+    const template = document.createElement("template");
+    template.innerHTML = tag.html;
+    const elements = template.content.querySelectorAll<HTMLElement>(".imageReference[data-reference-id][data-value]");
+    if (elements.length !== 1) return true;
+    const element = elements[0];
+    const reference = referenceMentions.value.find(item => item.id === element.dataset.referenceId && item.value === element.dataset.value);
+    if (!reference || element.textContent !== reference.name || [...element.children].some(child => child.tagName !== "IMG")) return true;
+    element.remove();
+    return !!template.content.textContent || [...template.content.querySelectorAll("*")].some(element => element.tagName !== "SPAN" || [...element.attributes].some(attribute => attribute.name !== "style"));
+  }))) return "提示词含有其他富文本标签，请编辑为文字和素材引用后再完善。";
+  if (!selectedMode.value || !matchingModes.value.some(mode => JSON.stringify(mode) === JSON.stringify(selectedMode.value))) return "引用素材与当前视频模式不匹配，请调整模式或引用。";
+  if (!currentWorkspaceDirectory()) return "请先选择项目。";
+  if (!selectedModel.value) return "请先选择视频模型。";
+  if (!data.value.prompt.trim()) return "请输入提示词。";
+  if (data.value.prompt.length > 10000) return "提示词完善最多支持10000字，请精简内容后再试。";
+  if (generating.value || deleting.value || uploading.value) return "请等待当前操作完成。";
+  return "";
+});
+const enhancementContext = computed(() => JSON.stringify([
+  id, currentWorkspaceDirectory(), data.value.model, data.value.mode,
+  data.value.duration, data.value.resolution, data.value.ratio, data.value.generateAudio,
+  selectedModel.value, refList.value,
+]));
+const enhancementSnapshot = computed(() => JSON.stringify([
+  enhancementContext.value, data.value.prompt, data.value.promptModel,
+]));
+function cancelPromptEnhancement() {
+  enhancementController?.abort();
+  enhancementController = undefined;
+  enhancingPrompt.value = false;
+}
+watch(enhancementSnapshot, () => {
+  cancelPromptEnhancement();
+  enhancementMessage.value = "";
+}, { flush: "sync" });
+watch(enhancementContext, () => { originalPrompt.value = undefined; }, { flush: "sync" });
+function setPrompt(value: string, promptModel?: PromptModel) {
+  data.value.prompt = value;
+  data.value.promptModel = promptModel ?? value.split("\n").map((text) => [{ type: "Write", text }]);
+}
+function restorePrompt() {
+  if (!originalPrompt.value || generating.value || deleting.value || enhancingPrompt.value) return;
+  const original = originalPrompt.value;
+  setPrompt(original.prompt, JSON.parse(JSON.stringify(original.promptModel)));
+  logPromptAction("promptRestored");
+  enhancementMessage.value = "已恢复原文，可继续编辑或直接生成。";
+}
+async function improvePrompt() {
+  if (enhancementDisabledReason.value || enhancingPrompt.value || disposed) return;
+  const choice = selectedModel.value!;
+  const snapshot = enhancementSnapshot.value;
+  const original = { prompt: data.value.prompt, promptModel: JSON.parse(JSON.stringify(data.value.promptModel)) as PromptModel };
+  const controller = new AbortController();
+  enhancementController = controller;
+  enhancingPrompt.value = true;
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+    if (enhancementController === controller) {
+      enhancementController = undefined;
+      enhancingPrompt.value = false;
+      enhancementMessage.value = "提示词完善超时，请重试或直接生成。";
+    }
+  }, 40000);
+  enhancementMessage.value = "";
+  try {
+    const result = await enhanceVideoPrompt({
+      directory: currentWorkspaceDirectory(), providerId: choice.providerId, modelId: choice.modelId,
+      prompt: original.prompt, mode: selectedMode.value, duration: data.value.duration,
+      references: refList.value.map(item => {
+        if (item.dataType === "STRING" && typeof item.value === "string") return { dataType: "STRING", value: item.value };
+        if ((item.dataType === "IMAGE" || item.dataType === "VIDEO") && item.value) return { dataType: item.dataType, value: { url: item.value.url, mimeType: item.value.mimeType } };
+        throw new Error("引用素材不可用，请检查引用内容。");
+      }),
+      resolution: data.value.resolution || undefined, ratio: data.value.ratio,
+      generateAudio: choice.audio === true || (choice.audio === "optional" && data.value.generateAudio === true),
+    }, controller.signal);
+    if (controller.signal.aborted || disposed || deleting.value || generating.value || snapshot !== enhancementSnapshot.value) return;
+    if (result.status === "clarification") {
+      enhancementMessage.value = [result.clarification ?? "请确认原文后重试，也可直接生成。", result.activityWarning].filter(Boolean).join(" ");
+      return;
+    }
+    originalPrompt.value ??= original;
+    assistanceId = result.assistanceId;
+    setPrompt(result.enhancedPrompt);
+    logPromptAction("promptApplied");
+    enhancementMessage.value = [result.changeSummary, result.activityWarning].filter(Boolean).join(" ");
+  } catch (error) {
+    if (!timedOut && !controller.signal.aborted && !disposed && snapshot === enhancementSnapshot.value) {
+      enhancementMessage.value = error instanceof Error ? error.message : "提示词完善失败，可直接使用原文生成。";
+    }
+  } finally {
+    clearTimeout(timeout);
+    if (enhancementController === controller) {
+      enhancementController = undefined;
+      enhancingPrompt.value = false;
+    }
+  }
+}
 
 function getMatchingModes(choice?: NodeMediaModel) {
   return (choice?.mode ?? []).filter((mode) => {
@@ -186,13 +324,23 @@ function getResolutions(choice: NodeMediaModel, duration?: number) {
   return [...new Set((choice.durationResolutionMap ?? []).filter((item) => item.duration.includes(duration!)).flatMap((item) => item.resolution))]
     .sort((left, right) => (Number.parseFloat(left) || Infinity) - (Number.parseFloat(right) || Infinity));
 }
+const generationDisabledReason = computed(() => {
+  const choice = selectedModel.value;
+  if (!choice) return "请先选择视频模型。";
+  if (!choice.mode?.length) return "该模型的生成模式尚未确认，请在模型接入中核实配置。";
+  if (choice.audio !== true && choice.audio !== false && choice.audio !== "optional") return "该模型的音频能力尚未确认，请在模型接入中核实配置。";
+  if (!getDurations(choice).length) return "该模型的时长与分辨率能力尚未确认，请先核实配置。";
+  if (!selectedMode.value || !matchingModes.value.some(mode => JSON.stringify(mode) === data.value.mode)) return "当前素材与模型模式不匹配，请调整引用或更换模型。";
+  if (refList.value.some(item => item.value === undefined)) return "引用素材暂无内容，请先补充素材。";
+  if (!getDurations(choice).includes(data.value.duration!) || !getResolutions(choice, data.value.duration).includes(data.value.resolution)) return "请选择该模型支持的时长与分辨率组合。";
+  if (choice.audio === "optional" && typeof data.value.generateAudio !== "boolean") return "请选择是否生成音频。";
+  return "";
+});
 // ACT: 引用改变时只替换不适用的模式；普通媒体优先作为参考，避免自动变成首尾帧。
 watch([selectedModel, matchingModes, () => data.value.mode], ([choice, matches]) => {
   if (!choice || matches.some((item) => JSON.stringify(item) === data.value.mode)) return;
-  const modes = choice.mode ?? [];
   const mode = matches.find(Array.isArray) ?? matches.find((item) => item === "singleImage")
-    ?? matches.find((item) => item === "endFrameOptional") ?? matches[0]
-    ?? modes.find((item) => JSON.stringify(item) === data.value.mode) ?? modes.find(Array.isArray) ?? modes[0];
+    ?? matches.find((item) => item === "endFrameOptional") ?? matches[0];
   data.value.mode = mode === undefined ? "" : JSON.stringify(mode);
 }, { flush: "sync" });
 // ACT: 参数在节点内归一化，未选中、未挂载底部设置时也可由 Agent 直接生成。
@@ -203,7 +351,7 @@ watch([selectedModel, () => data.value.duration], ([choice]) => {
   const resolutions = getResolutions(choice, data.value.duration);
   if (!resolutions.includes(data.value.resolution)) data.value.resolution = resolutions[0] ?? "";
   if (!ratioOptions.includes(data.value.ratio)) data.value.ratio = "9:16";
-  if (choice.audio !== "optional") data.value.generateAudio = choice.audio === true;
+  if (typeof choice.audio === "boolean") data.value.generateAudio = choice.audio;
 }, { flush: "sync" });
 const modelGroups = computed(() => groupNodeModels(models.value));
 const generationPrompt = computed(() =>
@@ -216,7 +364,7 @@ const generationPrompt = computed(() =>
 );
 const generationInput = computed<Omit<NodeVideoRequest, "directory"> | undefined>(() => {
   const choice = selectedModel.value;
-  if (!choice) return;
+  if (!choice || generationDisabledReason.value) return;
   const images = refList.value.flatMap(item => item.dataType === "IMAGE" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : []);
   return {
     providerId: choice.providerId,
@@ -248,6 +396,7 @@ onMounted(() => {
 });
 onScopeDispose(() => {
   disposed = true;
+  cancelPromptEnhancement();
   window.removeEventListener("toonflow:plugin-installed", refreshProviderModels);
   window.removeEventListener("toonflow:provider-config-changed", refreshProviderModels);
   generationController?.abort();
@@ -305,22 +454,54 @@ function loadModels() {
   return modelsRequest;
 }
 
+async function recoverGeneration() {
+  if (generating.value || uploading.value || deleting.value) return;
+  cancelPromptEnhancement();
+  const workspace = files.getWorkspaceFiles();
+  const controller = new AbortController();
+  generationController = controller;
+  recoveryMessage.value = "正在核对原任务，不会重新生成。";
+  generation = generationState.run(async () => {
+    const { directory } = await workspace.list("", AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]));
+    const result = await ai.recoverMedia(directory, controller.signal);
+    controller.signal.throwIfAborted();
+    if (result.state === "succeeded") {
+      const file = result.files[0];
+      if (!file || file.mediaType !== "video") throw new Error("原任务不是视频，请到任务中心查看结果");
+      outputs.value.video = { dataType: "VIDEO", value: { url: file.path, mimeType: file.mimeType } };
+      recoveryMessage.value = "原视频已恢复，没有重新生成。";
+    } else {
+      recoveryMessage.value = result.state === "closed" ? "已确认原请求未生成，可以重新提交。" : "当前节点没有待核对任务。";
+    }
+    return result;
+  }, result => result.state === "succeeded")
+    .then(() => {})
+    .catch(error => {
+      recoveryMessage.value = controller.signal.aborted ? "已停止核对，原任务提醒保留。" : error instanceof Error ? error.message : "核对失败，请稍后重试。";
+    })
+    .finally(() => { generationController = undefined; });
+  await generation;
+}
+
 async function startGeneration() {
+  cancelPromptEnhancement();
   const choice = selectedModel.value;
   const input = generationInput.value;
   if (generating.value) throw new Error("视频正在生成，请等待完成");
   if (uploading.value) throw new Error("视频正在替换，请等待完成");
   if (deleting.value) throw new Error("节点正在删除");
+  if (generationDisabledReason.value) throw new Error(generationDisabledReason.value);
   if (!choice || !input) throw new Error("请先选择视频模型");
   if (!generationPrompt.value) throw new Error("请输入生成提示词");
   if (refList.value.some(item => item.value === undefined)) throw new Error("引用节点暂无内容，请先补充引用内容");
+  recoveryMessage.value = "";
   if (choice.mode?.length && !matchingModes.value.length) throw new Error("当前模型没有适合这些参考素材的生成模式，请更换模型或调整引用");
   const workspace = files.getWorkspaceFiles();
   const controller = new AbortController();
   generationController = controller;
   // ACT: 工具立即返回，任务由节点持有，停止或卸载时取消。
   generation = generationState.run(() => workspace
-    .list()
+    .list("", AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]))
     .then(({ directory }) => {
       controller.signal.throwIfAborted();
       return ai.generateVideo({ ...input, directory }, controller.signal);
@@ -343,6 +524,7 @@ nodeEvent.on("save", (reason) => {
 nodeEvent.on("delete", async () => {
   if (uploading.value) throw new Error("视频正在替换，请稍后删除节点");
   deleting.value = true;
+  cancelPromptEnhancement();
   generationController?.abort();
   try {
     await generation;
@@ -434,8 +616,7 @@ nodeTools.register({
   parameters: z.strictObject({ prompt: z.string() }),
   execute({ prompt: value }) {
     if (deleting.value) throw new Error("节点正在删除，请稍后修改");
-    data.value.prompt = value;
-    data.value.promptModel = value.split("\n").map((text) => [{ type: "Write", text }]);
+    setPrompt(value);
     return { prompt: value };
   },
 });

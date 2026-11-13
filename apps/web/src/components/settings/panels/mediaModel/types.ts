@@ -17,4 +17,9 @@ export type MediaProvider = {
   models: MediaProviderModel[];
   revision: string;
   loadError?: string;
+  refreshSummary?: {
+    imported: number;
+    skipped: { id: string; reason: string }[];
+    preserved: number;
+  };
 };

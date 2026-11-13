@@ -25,7 +25,7 @@
         :fileAction="performFileAction"
         :saveNode="saveDocumentNode" />
     </keep-alive>
-    <workspaceMenu class="workspaceMenu" @openSettings="settingsVisible = true" />
+    <workspaceMenu class="workspaceMenu" @openSettings="openSettings" />
     <div class="workspaceTools">
       <el-segmented :modelValue="activePanel" class="panelSwitcher" :options="panelOptions" size="small" aria-label="切换面板" @change="switchPanel">
         <template #default="{ item }">
@@ -72,55 +72,27 @@
                       target="_blank"
                       rel="noopener noreferrer"
                       @click="helpVisible = false">
-                      使用教程
+                      参考教程
                     </el-button>
-                    <el-button
-                      class="helpAction"
-                      tag="a"
-                      text
-                      :icon="IconBug"
-                      href="https://docs.qq.com/smartsheet/form/EmvmQBrmlPmr%2Fss_vsqk2v%2FvhiGzE?tab=ss_vsqk2v"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Toonflow 需求/BUG反馈表"
-                      @click="helpVisible = false">
-                      汇报 BUG
-                    </el-button>
-                    <el-button class="helpAction" text :icon="IconBrandWechat" @click="showContact('community')">加入交流群</el-button>
-                    <el-button class="helpAction" text :icon="IconBriefcase" @click="showContact('business')">商务合作</el-button>
                   </div>
                 </el-popover>
               </span>
             </el-tooltip>
           </div>
         </el-card>
-        <el-tooltip v-if="!agentVisible" content="Toonflow Agent" placement="top" :showArrow="false" :hideAfter="0">
+        <el-tooltip v-if="!agentVisible" content="DCtiv Agent" placement="top" :showArrow="false" :hideAfter="0">
           <el-button
             class="agentButton"
             :class="{ standalone: activePanel !== 'canvas' }"
             :aria-expanded="agentVisible"
-            aria-label="Toonflow Agent"
+            aria-label="DCtiv Agent"
             aria-controls="agentPanel"
             @click="agentVisible = !agentVisible"></el-button>
         </el-tooltip>
       </div>
     </div>
     <floatingAgent v-model="agentVisible" @resize="agentWidth = $event" />
-    <settings v-model="settingsVisible" />
-    <el-dialog v-model="contactVisible" :title="contactInfo.title" width="min(360px, calc(100vw - 32px))" alignCenter appendToBody>
-      <div class="contactContent">
-        <q-r-code
-          :value="contactInfo.url"
-          :size="192"
-          type="svg"
-          color="#000000"
-          bgColor="#ffffff"
-          borderless
-          role="img"
-          :aria-label="`${contactInfo.title}二维码`" />
-        <p class="contactTip">{{ contactInfo.tip }}</p>
-      </div>
-    </el-dialog>
+    <settings v-model="settingsVisible" :initialPanel="settingsPanel" />
   </main>
 </template>
 
@@ -128,9 +100,8 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onScopeDispose, provide, ref, shallowRef, watch, type ComponentPublicInstance } from "vue";
 import { onBeforeRouteLeave } from "vue-router";
 import axios from "axios";
-import { IconVector, IconFileText, IconPointer, IconHandStop, IconPlus, IconHelp, IconBook, IconBug, IconBrandWechat, IconBriefcase } from "@tabler/icons-vue";
+import { IconVector, IconFileText, IconPointer, IconHandStop, IconPlus, IconHelp, IconBook } from "@tabler/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { QRCode } from "tdesign-vue-next";
 import settings from "@/components/settings/index.vue";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { registerWorkspaceControl, waitForControlValue } from "@/lib/mcpControl";
@@ -155,28 +126,12 @@ const panelOptions = [
 const agentVisible = ref(true);
 const agentWidth = ref(0);
 const settingsVisible = ref(false);
-const helpVisible = ref(false);
-const contactVisible = ref(false);
-const contactType = ref<"community" | "business">("community");
-const contacts = {
-  community: {
-    title: "加入交流群",
-    url: "https://work.weixin.qq.com/u/vc36adcc89845edcbe?v=5.0.3.63936&bb=85b8d228e8",
-    tip: "Toonflow 是为爱发电的开源项目。欢迎文明交流、友善反馈；回复可能需要一些时间，请避免责问或命令式沟通，感谢你的理解与尊重。",
-  },
-  business: {
-    title: "商务合作",
-    url: "https://work.weixin.qq.com/u/vc0f54596c5837d05a?v=5.0.8.70675",
-    tip: "此联系方式仅用于商务合作接洽，不提供问题答疑。使用问题欢迎在交流群交流，需求与 BUG 可通过反馈表提交。感谢理解。",
-  },
-};
-const contactInfo = computed(() => contacts[contactType.value]);
-
-function showContact(type: "community" | "business") {
-  contactType.value = type;
-  helpVisible.value = false;
-  contactVisible.value = true;
+const settingsPanel = ref<"languageModel" | "mediaModel">();
+function openSettings(panel?: "languageModel" | "mediaModel") {
+  settingsPanel.value = panel;
+  settingsVisible.value = true;
 }
+const helpVisible = ref(false);
 const canvasPanelRef = ref<InstanceType<typeof canvasPanel>>();
 const documentPanelCache = shallowRef<{ directory: string; instance: InstanceType<typeof documentPanel> }>();
 const documentPanelRef = computed(() => documentPanelCache.value?.directory === workspaceStore.project?.directory ? documentPanelCache.value?.instance : undefined);

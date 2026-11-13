@@ -20,5 +20,5 @@ export default Router().get("/", validateFields({
       mediaType: req.query.mediaType as MediaTaskFilters["mediaType"],
       status: req.query.status as MediaTaskFilters["status"],
       reviewState: req.query.reviewState as MediaTaskFilters["reviewState"],
-    })));
+    }, true)));
 });

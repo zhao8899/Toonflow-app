@@ -61,7 +61,7 @@ export type NodeAiTool = {
 
 async function readResult<T>(response: Response): Promise<T> {
   const result = await response.json();
-  if (!response.ok || result.code !== 200) throw new Error(result.message || `AI 请求失败（HTTP ${response.status}）`);
+  if (!response.ok || result.code !== 200) throw Object.assign(new Error(result.message || `AI 请求失败（HTTP ${response.status}）`), { status: response.status });
   return result.data;
 }
 
@@ -69,6 +69,9 @@ async function readResult<T>(response: Response): Promise<T> {
 const modelCacheKey = Symbol.for("toonflow.nodeModels");
 const modelCacheHost = globalThis as typeof globalThis & { [modelCacheKey]?: Map<string, Promise<unknown[]>> };
 const modelCache = modelCacheHost[modelCacheKey] ??= new Map<string, Promise<unknown[]>>();
+const recoveryKey = Symbol.for("toonflow.nodeRecovery");
+const recoveryHost = globalThis as typeof globalThis & { [recoveryKey]?: Set<string> };
+const recovering = recoveryHost[recoveryKey] ??= new Set<string>();
 
 type MediaPriceCache = {
   prices: Map<string, { expires: number; value: Promise<NodeMediaPrice | null> }>;
@@ -98,7 +101,7 @@ async function readModels<T>(url: string, signal: AbortSignal): Promise<T[]> {
   signal.throwIfAborted();
   let pending = modelCache.get(url);
   if (!pending) {
-    const request = fetch(url, { cache: "no-store" }).then(readResult<unknown[]>).catch(error => {
+    const request = fetch(url, { cache: "no-store", signal: AbortSignal.timeout(20000) }).then(readResult<unknown[]>).catch(error => {
       if (modelCache.get(url) === request) modelCache.delete(url);
       throw error;
     });
@@ -167,7 +170,7 @@ async function requestModel(input: NodeAiRequest, context: Context, model: Model
   return stream;
 }
 
-export function useNodeAi() {
+export function useNodeAi(nodeId?: string, getProjectId?: () => string | undefined) {
   const controller = new AbortController();
   onScopeDispose(() => controller.abort());
   const requestSignal = (signal?: AbortSignal) => signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
@@ -247,18 +250,100 @@ export function useNodeAi() {
     }
   }
 
-  async function generateMedia<T extends "image" | "video" | "audio">(mediaType: T, input: NodeImageRequest | NodeVideoRequest | NodeAudioRequest, signal?: AbortSignal) {
+  async function generateMedia<T extends "image" | "video" | "audio">(mediaType: T, input: NodeImageRequest | NodeVideoRequest | NodeAudioRequest, signal?: AbortSignal, recovery = false) {
     const waitingSignal = requestSignal(signal);
     waitingSignal.throwIfAborted();
-    const requestId = crypto.randomUUID();
     const directory = input.directory;
-    const headers = { "Content-Type": "application/json", "x-toonflow-workspace": "1" };
-    const query = new URLSearchParams({ directory, id: requestId });
+    const projectId = getProjectId?.();
+    const storageKey = `toonflow.nodeSubmission.${JSON.stringify([directory, nodeId ?? input.outputDirectory])}`;
+    const headers: Record<string, string> = { "Content-Type": "application/json", "x-toonflow-workspace": "1" };
+    const timedSignal = () => AbortSignal.any([waitingSignal, AbortSignal.timeout(20000)]);
+    let administrator = false;
+    async function account() {
+      const status = await readResult<{ required: boolean }>(await fetch("/api/auth/status", { cache: "no-store", signal: timedSignal() }));
+      if (status.required === false) { administrator = false; return null; }
+      if (status.required !== true) throw new Error("无法确认登录状态");
+      const user = await readResult<{ id: string; role: string }>(await fetch("/api/auth/session", { cache: "no-store", signal: timedSignal() }));
+      if (typeof user.id !== "string" || !user.id) throw new Error("无法确认当前账号");
+      administrator = user.role === "admin";
+      return user.id;
+    }
+    const actorId = await account();
+    waitingSignal.throwIfAborted();
+    if (actorId) headers["x-toonflow-user-id"] = actorId;
+    if (actorId && projectId) headers["x-toonflow-project-id"] = projectId;
+    const fingerprint = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ ...input, mediaType })))), byte => byte.toString(16).padStart(2, "0")).join("");
+    let record: { requestId: string; mediaType: string; outputDirectory: string; actorId: string | null; fingerprint: string };
+    let restored = false;
     try {
-      let task = await readResult<MediaTask>(await fetch("/api/ai/media/tasks/create", {
+      const saved = sessionStorage.getItem(storageKey);
+      if (saved) {
+        record = JSON.parse(saved);
+        if (!record || !/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(record.requestId)
+          || !["image", "video", "audio"].includes(record.mediaType) || typeof record.outputDirectory !== "string"
+          || !record.outputDirectory || typeof record.fingerprint !== "string" || !(record.actorId === null || typeof record.actorId === "string")) throw new Error("记录无效");
+        restored = true;
+      } else {
+        if (recovery) throw new Error("原任务提醒已变化，请重新核对");
+        record = { requestId: crypto.randomUUID(), mediaType, outputDirectory: input.outputDirectory, actorId, fingerprint };
+        sessionStorage.setItem(storageKey, JSON.stringify(record));
+      }
+    } catch { throw new Error("无法安全读写原任务提醒，未提交新任务。请恢复浏览器存储后重试，勿清除提醒"); }
+    if (record.actorId !== actorId) throw new Error("原任务属于其他登录状态，请切回原账号核对；未提交新任务");
+    const requestId = record.requestId;
+    let released = false;
+    const query = new URLSearchParams({ directory, id: requestId });
+    async function verifyContext() {
+      waitingSignal.throwIfAborted();
+      if (await account() !== actorId) throw new Error("登录状态已变化，原任务提醒已保留");
+      waitingSignal.throwIfAborted();
+      if (getProjectId?.() !== projectId) throw new Error("项目已变化，原任务提醒已保留");
+      if (JSON.parse(sessionStorage.getItem(storageKey) ?? "null")?.requestId !== requestId) throw new Error("任务提醒已变化，请重新核对");
+    }
+    function release() {
+      if (JSON.parse(sessionStorage.getItem(storageKey) ?? "null")?.requestId !== requestId) throw new Error("任务提醒已变化，请重新核对");
+      sessionStorage.removeItem(storageKey);
+      released = true;
+    }
+    async function verify(task: MediaTask) {
+      await verifyContext();
+      if (!task || task.id !== requestId || task.mediaType !== record.mediaType || (task.createdBy?.id ?? null) !== actorId
+        || actorId && projectId && task.projectId !== projectId
+        || !["queued", "running", "saving", "cancelling", "succeeded", "failed", "cancelled", "interrupted"].includes(task.status)) throw new Error("原任务响应不匹配，提醒已保留");
+      return task;
+    }
+    try {
+      await verifyContext();
+      let initial: MediaTask;
+      try {
+        initial = await readResult<MediaTask>(await (restored ? fetch(`/api/ai/media/tasks/get?${query}`, {
+        headers, cache: "no-store", signal: timedSignal(),
+      }) : fetch("/api/ai/media/tasks/create", {
         method: "POST", headers, body: JSON.stringify({ ...input, mediaType, requestId }),
-        signal: AbortSignal.any([waitingSignal, AbortSignal.timeout(20000)]),
-      }));
+        signal: timedSignal(),
+        })));
+      } catch (error) {
+        if (!recovery || (error as { status?: number })?.status !== 404) throw error;
+        if (!actorId || !projectId) throw new Error("当前本地或未关联项目的提交无法安全关闭，请到任务中心核对；原提醒保留");
+        await verifyContext();
+        const result = await readResult<{ state: string; task?: MediaTask; requestId?: string; projectId?: string; actorId?: string }>(await fetch("/api/ai/media/tasks/resolveSubmission", {
+          method: "POST", headers, body: JSON.stringify({ directory, requestId }), signal: timedSignal(),
+        }));
+        await verifyContext();
+        if (result.state === "closed" && result.requestId === requestId && result.projectId === projectId && result.actorId === actorId) {
+          release();
+          return [] as { path: string; mimeType: string; mediaType: T }[];
+        }
+        if (result.state !== "existing" || !result.task) throw new Error("提交核对响应不匹配，提醒已保留");
+        initial = result.task;
+      }
+      let task = await verify(initial);
+      if (recovery && task.mediaType === "video" && task.canResume === true && administrator) {
+        await verifyContext();
+        task = await verify(await readResult<MediaTask>(await fetch("/api/ai/media/tasks/resume", {
+          method: "POST", headers, body: JSON.stringify({ directory, id: requestId }), signal: timedSignal(),
+        })));
+      }
       while (["queued", "running", "saving", "cancelling"].includes(task.status)) {
         await new Promise<void>((resolve, reject) => {
           const abort = () => { clearTimeout(timer); waitingSignal.removeEventListener("abort", abort); reject(waitingSignal.reason); };
@@ -266,15 +351,28 @@ export function useNodeAi() {
           waitingSignal.addEventListener("abort", abort, { once: true });
           if (waitingSignal.aborted) abort();
         });
-        task = await readResult<MediaTask>(await fetch(`/api/ai/media/tasks/get?${query}`, {
+        task = await verify(await readResult<MediaTask>(await fetch(`/api/ai/media/tasks/get?${query}`, {
           headers, cache: "no-store", signal: AbortSignal.any([waitingSignal, AbortSignal.timeout(20000)]),
-        }));
+        })));
       }
+      // 服务端返回规范化的工作区相对路径；根目录、点段及末尾分隔符不能导致已保存结果被误拒绝。
+      const outputDirectory = record.outputDirectory.replace(/\\/g, "/").split("/").filter(part => part && part !== ".").join("/");
+      if (task.status === "succeeded" && (!Array.isArray(task.files) || !task.files.length || task.files.some(file => !file || file.mediaType !== record.mediaType
+        || typeof file.path !== "string" || /[\\:\u0000-\u001f]/.test(file.path) || file.path.split("/").some(part => !part || part === "." || part === "..")
+        || outputDirectory && !file.path.startsWith(`${outputDirectory}/`) || typeof file.mimeType !== "string"))) throw new Error("原任务输出无效，提醒已保留");
+      if (task.status !== "succeeded" && task.billingState !== "notSubmitted") throw new Error(recovery && task.canResume && !administrator
+        ? "原任务需登录管理员续查，请联系管理员在任务中心核对；提醒保留，不会新建任务"
+        : "原任务的供应商状态或费用尚未确认，当前不能自动解锁，请到任务中心续查并核对供应商；不会新建任务");
+      // ACT: 仅成功或明确未提交供应商时解除本标签页节点槽；本地失败不等于供应商已停止。
+      release();
+      if (recovery && task.status !== "succeeded") return [] as { path: string; mimeType: string; mediaType: T }[];
       if (task.status !== "succeeded") throw new Error(task.error || "生成未完成");
+      if (!recovery && (record.fingerprint !== fingerprint || record.mediaType !== mediaType)) throw new Error("原任务已完成，可到生成任务查看；当前参数已改变，本次没有生成新任务，请再次点击生成");
       return task.files as { path: string; mimeType: string; mediaType: T }[];
     } catch (error) {
+      if (released) throw error;
       // ACT: 离开节点只停止等待；主动点击停止则请求取消，供应商是否退款仍需核对。
-      if (signal?.aborted && !controller.signal.aborted) {
+      if (!recovery && signal?.aborted && !controller.signal.aborted) {
         try {
           await readResult<MediaTask>(await fetch("/api/ai/media/tasks/cancel", {
             method: "POST", headers, body: JSON.stringify({ directory, id: requestId }), signal: AbortSignal.timeout(10000),
@@ -282,8 +380,27 @@ export function useNodeAi() {
         } catch { throw new Error(`取消未确认，请到生成任务中查看（${requestId}）`); }
       }
       if (waitingSignal.aborted) throw waitingSignal.reason;
-      throw new Error(`${error instanceof Error ? error.message : "任务连接中断"}；请到生成任务查看状态，勿重复提交（${requestId}）`);
+      throw new Error(`${error instanceof Error ? error.message : "任务连接中断"}；下次点击仅核对并恢复原任务，不使用新参数。若仍无法查到，请到任务中心核对，勿清除浏览器提醒（${requestId}）`);
     }
+  }
+
+  async function recoverMedia(directory: string, signal?: AbortSignal): Promise<{ state: "empty" | "closed" } | { state: "succeeded"; files: { path: string; mimeType: string; mediaType: "image" | "video" | "audio" }[] }> {
+    requestSignal(signal).throwIfAborted();
+    if (!nodeId) throw new Error("当前节点缺少恢复标识");
+    const key = `toonflow.nodeSubmission.${JSON.stringify([directory, nodeId])}`;
+    if (recovering.has(key)) throw new Error("原任务正在核对，请等待完成");
+    let record: { mediaType: "image" | "video" | "audio"; outputDirectory: string };
+    try {
+      const saved = sessionStorage.getItem(key);
+      if (!saved) return { state: "empty" };
+      record = JSON.parse(saved);
+      if (!record || !["image", "video", "audio"].includes(record.mediaType) || typeof record.outputDirectory !== "string") throw new Error("记录无效");
+    } catch { throw new Error("无法读取原任务提醒，请恢复浏览器存储后重试，勿清除提醒"); }
+    recovering.add(key);
+    try {
+      const files = await generateMedia(record.mediaType, { directory, outputDirectory: record.outputDirectory, providerId: "", modelId: "", prompt: "" }, signal, true);
+      return files.length ? { state: "succeeded", files } : { state: "closed" };
+    } finally { recovering.delete(key); }
   }
 
   function generateImage(input: NodeImageRequest, signal?: AbortSignal) {
@@ -348,5 +465,5 @@ export function useNodeAi() {
     return { text, ...(reasoning ? { reasoning } : {}) };
   }
 
-  return { getModels, getMediaModels, getMediaPrice, generateImage, generateVideo, generateAudio, generate };
+  return { getModels, getMediaModels, getMediaPrice, generateImage, generateVideo, generateAudio, recoverMedia, generate };
 }

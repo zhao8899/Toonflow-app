@@ -3,6 +3,7 @@
     <el-card shadow="never" :bodyStyle="{ padding: '3px 6px' }">
       <div class="menuContent">
         <sessionMenu />
+        <el-button class="toolButton modelAccessButton" text @click="emit('openSettings', 'mediaModel')">模型接入</el-button>
         <el-button class="toolButton" text aria-label="生成任务" title="生成任务" @click="tasksVisible = true">
           <icon-list-details :size="18" aria-hidden="true" />
         </el-button>
@@ -35,7 +36,7 @@ import { hasDesktopUpdate } from "@/stores/desktopUpdate";
 import mediaTasks from "./mediaTasks.vue";
 import sessionMenu from "@/components/sessionMenu.vue";
 
-const emit = defineEmits<{ openSettings: [] }>();
+const emit = defineEmits<{ openSettings: [panel?: "languageModel" | "mediaModel"] }>();
 const router = useRouter();
 const exitVisible = ref(false);
 const leaving = ref(false);
@@ -64,6 +65,10 @@ async function exitProject() {
       height: 32px;
       margin: 0;
       padding: 0;
+      &.modelAccessButton {
+        width: auto;
+        padding: 0 10px;
+      }
     }
   }
 }

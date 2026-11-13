@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, shallowRef } from "vue";
+import { defineAsyncComponent, shallowRef, watch } from "vue";
 import { hasDesktopUpdate } from "@/stores/desktopUpdate";
 import { isMobile } from "@/lib/platform";
 import {
@@ -58,12 +58,12 @@ const settingsPanels = [
   { id: "general", label: "常规配置", icon: IconSettings, component: defineAsyncComponent(() => import("./panels/general/index.vue")) },
   {
     id: "languageModel",
-    label: "文本模型",
+    label: "文本模型接入",
     icon: IconSubtitlesAi,
     groupLabel: "模型",
     component: defineAsyncComponent(() => import("./panels/languageModel/index.vue")),
   },
-  { id: "mediaModel", label: "媒体模型", icon: IconPhotoVideo, component: defineAsyncComponent(() => import("./panels/mediaModel/index.vue")) },
+  { id: "mediaModel", label: "图片 / 视频 / 音频", icon: IconPhotoVideo, component: defineAsyncComponent(() => import("./panels/mediaModel/index.vue")) },
   {
     id: "pluginMarket",
     label: "插件市场",
@@ -88,6 +88,10 @@ const settingsPanels = [
 ];
 const activePanel = shallowRef(settingsPanels[0]!);
 const visible = defineModel<boolean>({ default: false });
+const props = defineProps<{ initialPanel?: "languageModel" | "mediaModel" }>();
+watch([visible, () => props.initialPanel], ([opened, panel]) => {
+  if (opened && panel) activePanel.value = settingsPanels.find(item => item.id === panel)!;
+}, { immediate: true });
 </script>
 
 <style lang="scss" scoped>

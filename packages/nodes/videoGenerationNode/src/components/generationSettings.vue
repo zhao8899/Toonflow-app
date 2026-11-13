@@ -10,7 +10,7 @@
     <div class="generationSettings nodrag nopan nowheel" @pointerdown.stop @mousedown.stop @dblclick.stop @keydown.stop @wheel.stop>
       <div v-if="modes.length" class="sectionLabel">生成模式</div>
       <el-select v-if="modes.length" v-model="mode" :disabled="disabled" :teleported="false" aria-label="视频生成模式">
-        <el-option v-for="item in modes" :key="item.value" :value="item.value" :label="item.label" />
+        <el-option v-for="item in modes" :key="item.value" :value="item.value" :label="item.label" :disabled="availableModes !== undefined && !availableModes.some(mode => JSON.stringify(mode) === item.value)" />
       </el-select>
       <div v-if="durations.length || resolutions.length" class="outputOptions">
         <div v-if="durations.length" class="outputField">
@@ -39,6 +39,7 @@
         <span class="sectionLabel">生成音频</span>
         <el-switch v-model="generateAudio" :disabled="disabled" aria-label="生成音频" />
       </div>
+      <p v-else-if="model">{{ model.audio === true ? '此模型始终输出音频。' : model.audio === false ? '此模型不支持音频输出。' : '音频能力尚未确认，请先核实模型配置。' }}</p>
     </div>
   </el-popover>
 </template>
@@ -49,7 +50,7 @@ import { ElButton, ElPopover, ElSelect, ElOption, ElSwitch } from "element-plus"
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-vue";
 import type { NodeMediaModel } from "@toonflow/nodes-scaffold/runtime";
 
-const props = defineProps<{ model?: NodeMediaModel; disabled?: boolean; ratios: string[] }>();
+const props = defineProps<{ model?: NodeMediaModel; disabled?: boolean; ratios: string[]; availableModes?: NodeMediaModel["mode"] }>();
 const settingsVisible = ref(false);
 const duration = defineModel<number | undefined>("duration", { required: true });
 const resolution = defineModel<string>("resolution", { required: true });

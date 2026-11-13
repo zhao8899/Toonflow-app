@@ -64,7 +64,7 @@ export const canvasSchemas = {
   selectNodes: z.strictObject({ nodeIds: z.array(nodeId) }),
   arrangeCanvas: z.strictObject({}),
   fitCanvas: z.strictObject({ nodeIds: z.array(nodeId).optional() }),
-  nodeTools: z.strictObject({ nodeId, name: z.templateLiteral(["node:", z.string().regex(/^[a-z][a-zA-Z0-9]{0,63}$/)]), args: z.record(z.string(), z.json()) }),
+  nodeTools: z.strictObject({ nodeId: nodeId.describe("必填：目标节点ID，不能放入args"), name: z.templateLiteral(["node:", z.string().regex(/^[a-z][a-zA-Z0-9]{0,63}$/)]).describe("必填：getNodeTools返回的完整node:函数名，不能省略"), args: z.record(z.string(), z.json()).describe("函数参数；nodeId和name必须同时作为顶层字段提供") }),
 };
 
 export type CanvasOperationName = keyof typeof canvasSchemas;

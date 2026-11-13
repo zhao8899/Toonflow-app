@@ -61,9 +61,9 @@
             filterable
             :loading="modelsLoading"
             :disabled="generating || deleting"
-            placeholder="选择模型"
+            placeholder="搜索模型名称或 ID"
             aria-label="生成模型"
-            noDataText="请先在设置中添加图片模型"
+            noDataText="请从画布菜单的“模型接入”配置图片平台和模型"
             placement="top-start"
             @visible-change="(visible) => visible && loadModels().catch((error) => showNodeError(error, '模型读取失败'))">
             <template #prefix><icon-sparkles :size="17" /></template>
@@ -71,7 +71,7 @@
               <el-option
                 v-for="item in provider.models"
                 :key="item.modelId"
-                :label="item.label"
+                :label="item.label === item.modelId ? item.label : `${item.label} · ${item.modelId}`"
                 :value="JSON.stringify([item.providerId, item.modelId])" />
             </el-option-group>
           </el-select>
@@ -85,6 +85,7 @@
           <el-button v-if="editor?.mode === 'inpaint'" class="confirmButton" type="primary" :icon="IconCheck" :loading="editor.busy" :disabled="deleting || uploading || !generationPrompt" @click="confirmInpaint().catch(error => showNodeError(error, '重绘节点创建失败'))">确认</el-button>
           <div v-else class="generationActions">
             <mediaPrice v-if="priceInput" :input="{ ...priceInput, mediaType: 'image' }" :supported="selectedModel?.supportsPrice === true" />
+            <el-button :disabled="generating || deleting || uploading || editor?.busy || lightingVisible || multiAngleVisible || panorama?.visible || gridSplit?.splitting" @click="recoverGeneration().catch(error => showNodeError(error, '图片任务核对失败'))">核对并恢复</el-button>
             <el-button
               class="sendButton"
               :icon="generating ? IconPlayerStop : IconArrowUp"
@@ -111,7 +112,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from "vue";
-import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElImageViewer } from "element-plus";
+import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElImageViewer, ElMessage } from "element-plus";
 import { IconCheck, IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconLayoutGrid, IconBrush, IconPencil, IconSun, IconCameraRotate, IconPanoramaHorizontal, IconChevronDown } from "@tabler/icons-vue";
 import { nodeSkeleton, nodeTools, useNode, z, type NodeMediaModel, type NodeImageRequest, type NodeHandle } from "@toonflow/nodes-scaffold/runtime";
 import { groupNodeModels } from "@toonflow/node-shared/groupNodeModels";
@@ -316,6 +317,36 @@ async function confirmInpaint() {
   await inpaintEditor.createInpaint({ prompt, images }, new AbortController().signal);
 }
 
+async function recoverGeneration() {
+  if (disposed || generating.value || deleting.value || uploading.value || editor.value?.busy || lightingVisible.value || multiAngleVisible.value || panorama.value?.visible || gridSplit.value?.splitting) return;
+  const workspace = files.getWorkspaceFiles();
+  const controller = new AbortController();
+  const inpaintData = data.value.inpaint;
+  generationController = controller;
+  generation = generationState.run(async () => {
+    const { directory } = await workspace.list("", AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]));
+    controller.signal.throwIfAborted();
+    const recovered = await ai.recoverMedia(directory, controller.signal);
+    controller.signal.throwIfAborted();
+    if (recovered.state !== "succeeded") {
+      ElMessage.info(recovered.state === "empty" ? "当前节点没有待核对任务，本次没有提交新任务。" : "已核对原请求未生成，可以重新生成；本次没有提交新任务。");
+      return recovered;
+    }
+    if (inpaintData) {
+      ElMessage.info("原任务已完成，请到任务中心查看；局部重绘结果尚未合成，本次未替换节点图片。");
+      return recovered;
+    }
+    const result = recovered.files.find(item => item.mediaType === "image");
+    if (!result) throw new Error("原任务没有可恢复的图片，请到任务中心查看");
+    outputs.value.image = { dataType: "IMAGE", value: { url: result.path, mimeType: result.mimeType } };
+    ElMessage.success("已恢复原任务图片，未提交新生成。");
+    return recovered;
+  }, result => result.state === "succeeded" && !inpaintData).then(() => {}).finally(() => {
+    if (generationController === controller) generationController = undefined;
+  });
+  return generation;
+}
+
 async function startGeneration() {
   const input = generationInput.value;
   if (generating.value) throw new Error("图片正在生成，请等待完成");
@@ -335,7 +366,7 @@ async function startGeneration() {
   const inpaintData = data.value.inpaint;
   generationController = controller;
   // ACT: 工具立即返回，任务由节点持有，停止或卸载时取消。
-  generation = generationState.run(() => workspace.list()
+  generation = generationState.run(() => workspace.list("", AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]))
     .then(({ directory }) => {
       controller.signal.throwIfAborted();
       return inpaintData

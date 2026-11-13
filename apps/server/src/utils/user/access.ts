@@ -45,7 +45,7 @@ export function requireAccess(req: Request, res: Response, next: NextFunction) {
   return requireAuth(req, res, (cause?: unknown) => {
     if (cause) return next(cause);
     if (res.locals.userRole === "admin") return next();
-    // 成员默认拒绝：只开放会话、项目入口、项目内只读文件与审片接口；项目接口须携带项目 ID，由项目上下文中间件核对成员身份。
+    // 成员默认拒绝：只开放会话、项目入口、项目模型查询、只读文件与审片接口；项目接口须携带项目 ID，由项目上下文中间件核对成员身份。
     // ACT: 成员暂无画布/文档入口，不开放文件写入、改名、复制和删除；开放创作时再按项目权限细分。
     const path = req.path.toLowerCase().replace(/\/+$/, "");
     const scope = memberRoutes.find(route => route.path === path && route.methods.includes(req.method));
@@ -56,6 +56,11 @@ export function requireAccess(req: Request, res: Response, next: NextFunction) {
 }
 
 const memberRoutes = [
+  { path: "/ai/media/tasks/activity", methods: ["POST"], project: true },
+  { path: "/ai/media/tasks/enhanceprompt", methods: ["POST"], project: true },
+  { path: "/ai/media/tasks/quota", methods: ["GET", "HEAD"], project: true },
+  { path: "/ai/media/tasks/create", methods: ["POST"], project: true },
+  { path: "/ai/media/tasks/resolvesubmission", methods: ["POST"], project: true },
   { path: "/auth/session", methods: ["GET", "HEAD"], project: false },
   { path: "/auth/changepassword", methods: ["POST"], project: false },
   { path: "/auth/revokesessions", methods: ["POST"], project: false },
@@ -65,6 +70,7 @@ const memberRoutes = [
   { path: "/workspaces/files/read", methods: ["GET", "HEAD"], project: true },
   { path: "/ai/media/tasks/list", methods: ["GET", "HEAD"], project: true },
   { path: "/ai/media/tasks/get", methods: ["GET", "HEAD"], project: true },
+  { path: "/ai/media/tasks/models", methods: ["GET", "HEAD"], project: true },
   { path: "/ai/media/tasks/reviewhistory", methods: ["GET", "HEAD"], project: true },
   { path: "/ai/media/tasks/review", methods: ["PUT"], project: true },
 ];

@@ -51,7 +51,7 @@ const client = axios.create({ baseURL: "https://api.toonflow.net" });
 export function getTfApiKey() {
   const provider = customProviders.value.find(isTfRouterProvider);
   const mediaConfigs = settings.value.mediaProviderConfigs as Record<string, { apiKey?: unknown }> | undefined;
-  return [provider?.apiKey, mediaConfigs?.tfRouter?.apiKey]
+  return [settings.value.pluginMarketApiKey, provider?.apiKey, mediaConfigs?.tfRouter?.apiKey]
     .map(key => typeof key === "string" ? key.trim().replace(/^Bearer(?:\s+|$)/i, "").trim() : "")
     .find(Boolean) ?? "";
 }
