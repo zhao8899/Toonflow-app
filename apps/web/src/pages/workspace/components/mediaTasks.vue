@@ -405,7 +405,17 @@ async function load() {
     total.value = data.data.total;
     loadError.value = "";
   } catch (error) {
-    if (!current.signal.aborted) loadError.value = message(error);
+    if (!current.signal.aborted) {
+      loadError.value = message(error);
+      if (axios.isAxiosError(error) && [401, 403, 404].includes(error.response?.status ?? 0)) {
+        tasks.value = []; total.value = 0; corruptCount.value = 0; corruptTaskIds.value = [];
+        closePreview();
+        downloadController?.abort(); downloadController = undefined;
+        downloading.value = ""; downloadNotice.value = "";
+        reviewVisible.value = false; clearReview();
+        historyVisible.value = false; costVisible.value = false;
+      }
+    }
   } finally {
     await activityRequest;
     if (current === lifetime) loading.value = false;

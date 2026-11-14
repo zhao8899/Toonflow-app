@@ -33,7 +33,7 @@ const renderer = vue.createRenderer<HostNode, HostNode>({
   patchProp: (target, key, _previous, value) => { target.props[key] = value; },
 });
 
-function createPage(role: "admin" | "user" = "admin", required = true, cost = false) {
+function createPage(role: "admin" | "user" = "admin", required = true, cost = false, listRequest?: () => Promise<unknown>) {
   const requests: Pending[] = [];
   const actions: (Pending & { url: string; body: any })[] = [];
   const errors: string[] = [];
@@ -48,6 +48,7 @@ function createPage(role: "admin" | "user" = "admin", required = true, cost = fa
   const axios = {
     get(url: string, options: { signal: AbortSignal; headers: Record<string, string>; params?: unknown }) {
       if (url === "/api/activity/status") return new Promise((resolve, reject) => requests.push({ ...options, resolve, reject }));
+      if (url === "/api/ai/media/tasks/list" && listRequest) return listRequest();
       if (url === "/api/ai/media/tasks/list") return Promise.resolve({ data: { code: 200, data: { tasks: [], total: 0, corruptCount: 0, corruptTaskIds: [] } } });
       if (url === "/api/activity/export" || url === "/api/ai/media/tasks/get" || url === "/api/ai/media/tasks/costHistory") return new Promise((resolve, reject) => records.push({ ...options, body: options.params, resolve, reject }));
       throw new Error(`Unexpected HTTP request: ${url}`);
@@ -58,7 +59,7 @@ function createPage(role: "admin" | "user" = "admin", required = true, cost = fa
     put(_url: string, body: unknown, options: { signal: AbortSignal; headers: Record<string, string> }) {
       return new Promise((resolve, reject) => writes.push({ ...options, body, resolve, reject }));
     },
-    isAxiosError: () => false,
+    isAxiosError: (error: unknown) => !!error && typeof error === "object" && "response" in error,
   };
   const require = (id: string) => {
     if (id === "vue") return vue;
@@ -721,4 +722,19 @@ test("成本重读确认期间卸载后不再发出读取请求", async () => {
   page.stop();
   page.confirmations[0]!.resolve(); await reload;
   expect(page.records).toHaveLength(1);
+});
+
+for (const status of [401, 403, 404, 500]) test(`任务刷新${status}时授权失效清除旧结果，服务故障保留结果`, async () => {
+  let failure = false;
+  const page = createPage("user", true, false, () => failure ? Promise.reject({ response: { status, data: { message: "访问失败" } } }) : Promise.resolve({ data: { code: 200, data: { tasks: [], total: 0, corruptCount: 0, corruptTaskIds: [] } } }));
+  await flush();
+  page.state.tasks.value = [{ id: "cachedTask", status: "succeeded", files: [] }];
+  page.state.total.value = 1;
+  page.state.previewVisible.value = true;
+  failure = true;
+  await page.state.load(); await flush();
+  expect(page.state.tasks.value.length).toBe(status === 500 ? 1 : 0);
+  expect(page.state.total.value).toBe(status === 500 ? 1 : 0);
+  expect(page.state.previewVisible.value).toBe(status === 500);
+  expect(page.state.loadError.value).toBe("访问失败");
 });
