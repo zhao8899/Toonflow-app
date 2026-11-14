@@ -23,7 +23,7 @@
     "@tiptap/extension-subscript": "3.31.3",
     "@tiptap/extension-text-align": "3.31.3",
     "@tiptap/extension-find-and-replace": "3.31.3",
-    "dompurify": "3.4.16",
+    "dompurify": "3.4.17",
     "element-plus": "^2.14.5",
     "marked": "18.0.13",
     "vue": "^3.5.42"
@@ -36,7 +36,7 @@
   "devDependencies": {
     "sass": "^1.104.0",
     "typescript": "~6.0.3",
-    "vite": "^8.2.2",
+    "vite": "^8.2.4",
     "vue-tsc": "^3.3.11"
   }
 }

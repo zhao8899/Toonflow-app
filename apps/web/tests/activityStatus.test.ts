@@ -37,6 +37,7 @@ function createPage(role: "admin" | "user" = "admin", required = true, cost = fa
   const requests: Pending[] = [];
   const actions: (Pending & { url: string; body: any })[] = [];
   const errors: string[] = [];
+  const saved: { content: Blob; name: string }[] = [];
   const records: (Pending & { body: any })[] = [], writes: (Pending & { body: any })[] = [];
   const confirmations: { message: string; resolve: () => void; reject: (cause: unknown) => void }[] = [];
   const timers = new Map<number, () => void>();
@@ -65,7 +66,8 @@ function createPage(role: "admin" | "user" = "admin", required = true, cost = fa
     if (id === "element-plus") return { ElMessage: { error(message: string) { errors.push(message); } }, ElMessageBox: { confirm: (message: string) => new Promise<void>((resolve, reject) => confirmations.push({ message, resolve, reject })) } };
     if (id === "@/stores/workspace") return { useWorkspaceStore: () => workspace };
     if (id === "@/lib/auth") return { userRole, authRequired };
-    if (id === "@/lib/workspaceFiles" || id === "@/lib/saveFile") return () => {};
+    if (id === "@/lib/workspaceFiles") return () => {};
+    if (id === "@/lib/saveFile") return async (content: Blob, name: string) => { saved.push({ content, name }); return true; };
     if (id.endsWith(".vue")) return { render: () => null };
     throw new Error(`Unexpected component dependency: ${id}`);
   };
@@ -91,10 +93,75 @@ function createPage(role: "admin" | "user" = "admin", required = true, cost = fa
   dispose.push(stop);
   const text = (target: HostNode): string => target.text + target.children.map(text).join("");
   const alerts = (target: HostNode): string[] => [...(target.props.role === "alert" ? [text(target)] : []), ...target.children.flatMap(alerts)];
-  return { requests, records, writes, actions, errors, confirmations, stop, get state() { return state; }, userRole, modelValue, workspace, timers, reload: () => state!.load(), text: () => text(root), alerts: () => alerts(root) };
+  return { requests, records, writes, actions, errors, saved, confirmations, stop, get state() { return state; }, userRole, modelValue, workspace, timers, reload: () => state!.load(), text: () => text(root), alerts: () => alerts(root) };
 }
 
 const healthy = { bytes: 1048576, files: 4, limits: { maxBytes: 10485760, maxFiles: 100, maxRecordBytes: 1000, minFreeBytes: 1000 }, availableBytes: 1000000, blocked: false, reason: null as string | null, rejected: 2, lastRejectedAt: 1, lastScannedAt: 2, lastRejectedReason: null as string | null };
+
+test("当日日志导出保留成功内容、日期文件名及失败后重试", async () => {
+  const page = createPage();
+  page.state.activityDay.value = "2026-11-13";
+  const failed = page.state.exportActivity();
+  page.records[0]!.reject(new Error("导出失败")); await failed;
+  expect(page.errors).toEqual(["导出失败"]);
+  expect(page.state.exportingActivity.value).toBe(false);
+  const exporting = page.state.exportActivity();
+  expect(page.records[1]!.body).toEqual({ day: "2026-11-13" });
+  const content = { events: [{ stage: "succeeded" }] };
+  page.records[1]!.resolve({ data: { code: 200, data: content } }); await exporting;
+  expect(page.saved).toHaveLength(1);
+  expect(page.saved[0]!.name).toBe("activity20261113.json");
+  expect(JSON.parse(await page.saved[0]!.content.text())).toEqual(content);
+  expect(page.state.exportingActivity.value).toBe(false);
+});
+
+for (const change of ["关闭", "切换项目", "降权", "修改日期", "卸载"] as const) {
+  test(`当日日志导出在${change}后丢弃迟到成功与失败响应`, async () => {
+    for (const failed of [false, true]) {
+      const page = createPage();
+      const exporting = page.state.exportActivity();
+      const request = page.records[0]!;
+      if (change === "关闭") page.modelValue.value = false;
+      if (change === "切换项目") page.workspace.project = { directory: "/synthetic/other", serverProjectId: "two" };
+      if (change === "降权") page.userRole.value = "user";
+      if (change === "修改日期") page.state.activityDay.value = "2026-01-01";
+      if (change === "卸载") page.stop();
+      await flush();
+      if (failed) request.reject(new Error("迟到错误"));
+      else request.resolve({ data: { code: 200, data: { events: [] } } });
+      await exporting;
+      expect(page.saved).toHaveLength(0);
+      expect(page.errors).toHaveLength(0);
+      expect(request.signal?.aborted).toBe(true);
+      expect(page.state.exportingActivity.value).toBe(false);
+    }
+  });
+}
+
+test("当日日志导出取消后可重新开始，旧请求结束不解除新请求忙状态", async () => {
+  const page = createPage();
+  const previous = page.state.exportActivity();
+  page.state.activityDay.value = "2026-01-01";
+  const current = page.state.exportActivity();
+  expect(page.records).toHaveLength(2);
+  page.records[0]!.resolve({ data: { code: 200, data: { stale: true } } }); await previous;
+  expect(page.state.exportingActivity.value).toBe(true);
+  expect(page.saved).toHaveLength(0);
+  page.records[1]!.resolve({ data: { code: 200, data: { current: true } } }); await current;
+  expect(page.saved).toHaveLength(1);
+  expect(page.saved[0]!.name).toBe("activity20260101.json");
+  expect(page.state.exportingActivity.value).toBe(false);
+});
+
+test("成员及关闭后的面板不能启动当日日志导出", async () => {
+  const page = createPage("user");
+  void page.state.exportActivity();
+  expect(page.records).toHaveLength(0);
+  page.userRole.value = "admin";
+  page.modelValue.value = false; await flush();
+  void page.state.exportActivity();
+  expect(page.records).toHaveLength(0);
+});
 
 test("平台卡片仅显示本地配置与分类数量，不回显密钥或自动展开账户", async () => {
   const page = await createMediaSettingsPage();

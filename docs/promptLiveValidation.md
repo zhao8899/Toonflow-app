@@ -1,5 +1,7 @@
 # 提示词辅助真实调用验证
 
+> 本文保留阶段性方案/演练记录。当前结论见[验收记录](../ACCEPTANCE.md)；文中旧轮次详见[历史验收](archive/round46/acceptanceHistory.md)。操作前核对目标环境与授权。
+
 日期：2026-10-28。平台：https://www.fytoken.net/v1。
 
 用户授权付费验证，辅助模型 deepseek-v4-1-flash-261017；视频模型 doubao-seedance-2-0-260128。密钥仅保存于忽略版本控制的本地配置，不写入本记录。

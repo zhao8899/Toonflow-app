@@ -2,8 +2,12 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Server } from "node:http";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
+import { gzipSync } from "node:zlib";
 import { mkdir, mkdtemp, readFile, rm, withFileAccess, writeAtomic } from "@toonflow/file";
+import { z } from "zod";
 
 let server: Server | undefined;
 let origin = "";
@@ -78,6 +82,183 @@ async function login(username: string) {
   return cookie;
 }
 
+if (!isolatedProcess) test("实际配置依赖的 URI 规范化不把编码协议提升为可执行协议", () => {
+  const confRequire = createRequire(import.meta.resolve("conf"));
+  const ajvRequire = createRequire(confRequire.resolve("ajv"));
+  const uri = ajvRequire("fast-uri");
+  expect(uri.normalize("https://EXAMPLE.com/path")).toBe("https://example.com/path");
+  expect(uri.resolve("https://example.com/base/", "../asset")).toBe("https://example.com/asset");
+  expect(uri.normalize("%6Aavascript:alert(1)")).not.toBe("javascript:alert(1)");
+  expect(() => uri.resolve("https://example.com/", "%6Aavascript:alert(1)")).toThrow("URI scheme is malformed.");
+  expect(uri.equal("%68ttp://example.com/", "http://example.com/")).toBe(false);
+  expect(uri.normalize("javascript:alert(1)", { reference: "suffix", scheme: "x" })).toBe("javascript%3Aalert(1)");
+});
+
+if (!isolatedProcess) test("实际 Express 依赖的 comma 序列化处理自有非函数 toString", () => {
+  const expressRequire = createRequire(import.meta.resolve("express"));
+  const qs = expressRequire("qs");
+  expect(qs.parse("name=local&items%5B0%5D=one")).toEqual({ name: "local", items: ["one"] });
+  expect(qs.stringify({ items: ["one", "two"] }, { arrayFormat: "comma" })).toBe("items=one%2Ctwo");
+  const input = JSON.parse('{"items":[{"toString":"notCallable"}]}');
+  for (const encodeValuesOnly of [false, true]) {
+    expect(() => qs.stringify(input, { arrayFormat: "comma", encodeValuesOnly })).not.toThrow();
+  }
+});
+
+if (!isolatedProcess) test("受限集合在超出上限时先拒绝，不逐项执行校验", () => {
+  let checked = 0;
+  const schema = z.array(z.string().refine(() => { checked++; return true; })).max(32);
+  const oversized = schema.safeParse(Array.from({ length: 33 }, () => "bounded"));
+  expect(oversized.success).toBe(false);
+  expect(oversized.error?.issues.map(issue => issue.code)).toEqual(["too_big"]);
+  expect(checked).toBe(0);
+  expect(schema.safeParse(["valid"]).success).toBe(true);
+  expect(checked).toBe(1);
+});
+
+if (!isolatedProcess) test("真实 MCP 路由双会话独立响应、鉴权与关闭兼容", async () => {
+  const { default: express } = await import("express");
+  const { createMcpRouter } = await import("@toonflow/mcp");
+  const token = crypto.randomUUID();
+  const router = createMcpRouter({
+    authorize: request => request.get("authorization") === `Bearer ${token}`,
+    getTools: async () => [{ name: "echo", description: "隔离兼容验证", inputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"], additionalProperties: false },
+      execute: async (args, signal) => { signal.throwIfAborted(); return { value: args.value }; } }],
+  });
+  const listener = express().use(express.json({ limit: "16kb" })).use("/mcp", router).listen(0, "127.0.0.1");
+  try {
+    await new Promise<void>((resolve, reject) => { listener.once("listening", resolve); listener.once("error", reject); });
+    const address = listener.address();
+    if (!address || typeof address === "string") throw new Error("MCP 回环服务未取得端口");
+    const call = (body: unknown, session = "", method = "POST", authorized = true) => fetch(`http://127.0.0.1:${address.port}/mcp`, {
+      method, signal: AbortSignal.timeout(3000),
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-03-26",
+        ...(authorized ? { authorization: `Bearer ${token}` } : {}), ...(session ? { "mcp-session-id": session } : {}) },
+      body: method === "POST" ? JSON.stringify(body) : undefined,
+    });
+    const result = async (response: Response) => {
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      return JSON.parse(response.headers.get("content-type")?.includes("text/event-stream") ? text.split("\n").find(line => line.startsWith("data: "))!.slice(6) : text);
+    };
+    const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "localRegression", version: "1" } } };
+    expect((await call(initialize, "", "POST", false)).status).toBe(401);
+    const responses = await Promise.all([call(initialize), call(initialize)]);
+    const sessions = responses.map(response => response.headers.get("mcp-session-id")!);
+    expect(sessions.every(Boolean)).toBe(true);
+    expect(sessions[0]).not.toBe(sessions[1]);
+    for (const response of responses) expect((await result(response)).result.capabilities.tools).toBeDefined();
+    for (const session of sessions) expect((await call({ jsonrpc: "2.0", method: "notifications/initialized" }, session)).status).toBe(202);
+    const echo = (session: string, value: string) => call({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "echo", arguments: { value } } }, session).then(result);
+    const results = await Promise.all([echo(sessions[0]!, "first"), echo(sessions[1]!, "second")]);
+    expect(results.map(item => item.id)).toEqual([2, 2]);
+    expect(results.map(item => item.result.structuredContent.value)).toEqual(["first", "second"]);
+    expect((await call(undefined, sessions[0], "DELETE")).status).toBe(200);
+    expect((await call({ jsonrpc: "2.0", id: 3, method: "tools/list" }, sessions[0])).status).toBe(404);
+    expect((await echo(sessions[1]!, "stillOpen")).result.structuredContent.value).toBe("stillOpen");
+    const mcpRequire = createRequire(import.meta.resolve("@toonflow/mcp"));
+    const { Client, StreamableHTTPClientTransport } = await import(pathToFileURL(mcpRequire.resolve("@modelcontextprotocol/client")).href);
+    const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(3000) },
+    });
+    const client = new Client({ name: "localSdkRegression", version: "1" });
+    try {
+      await client.connect(transport);
+      expect((await client.listTools()).tools.map((tool: { name: string }) => tool.name)).toEqual(["echo"]);
+      expect((await client.callTool({ name: "echo", arguments: { value: "clientSdk" } })).structuredContent).toEqual({ value: "clientSdk" });
+      const sdkSession = transport.sessionId;
+      expect(sdkSession).toBeDefined();
+      await transport.terminateSession();
+      expect((await call({ jsonrpc: "2.0", id: 5, method: "tools/list" }, sdkSession)).status).toBe(404);
+    } finally { await client.close(); }
+    await router.close();
+    expect((await call({ jsonrpc: "2.0", id: 4, method: "tools/list" }, sessions[1])).status).toBe(404);
+  } finally {
+    await router.close(); listener.closeAllConnections();
+    await new Promise<void>((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
+  }
+}, 15000);
+
+if (!isolatedProcess) test("实际代理依赖解析到的 undici Client 与 Pool 可回环请求并关闭", async () => {
+  const agentRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+  // Bun 将裸 undici 导入替换为内建层；此处验证 override 实际安装的 npm 包。
+  const { Client, Pool } = agentRequire(join(dirname(agentRequire.resolve("undici/package.json")), "index.js"));
+  const received: string[] = [];
+  const local = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+    received.push(`${request.method} ${new URL(request.url).pathname}`);
+    return Response.json({ local: true });
+  } });
+  const url = `http://127.0.0.1:${local.port}`;
+  const clients = [new Client(url), new Pool(url, { connections: 1 })];
+  try {
+    for (const [index, client] of clients.entries()) {
+      const response = await client.request({ path: `/probe${index}`, method: "GET", signal: AbortSignal.timeout(3000) });
+      expect(response.statusCode).toBe(200);
+      expect(await response.body.json()).toEqual({ local: true });
+      await client.close();
+      expect(client.closed).toBe(true);
+    }
+    expect(received).toEqual(["GET /probe0", "GET /probe1"]);
+  } finally {
+    try { await Promise.all(clients.filter(client => !client.closed).map(client => client.close())); }
+    finally { await local.stop(true); }
+  }
+}, 10000);
+
+if (!isolatedProcess) test.skipIf(!process.env.TOONFLOW_BROWSER_TEST_EXECUTABLE)("隔离真实浏览器验证宿主使用的 CDP API、页面操作与上下文隔离", async () => {
+  const browserRequire = createRequire(import.meta.resolve("@toonflow/tool-browser/host"));
+  const { default: puppeteer } = await import(pathToFileURL(browserRequire.resolve("puppeteer-core")).href);
+  const profile = await mkdtemp(join(tmpdir(), "toonflowBrowserCompatibility"));
+  const local = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() {
+    return new Response('<!doctype html><title>Local browser regression</title><label>Name<input id="name"></label><button id="apply" onclick="document.querySelector(\'output\').textContent=document.querySelector(\'input\').value">Apply</button><output></output>', { headers: { "content-type": "text/html" } });
+  } });
+  const localOrigin = `http://127.0.0.1:${local.port}`;
+  let browser: any;
+  try {
+    browser = await puppeteer.launch({ executablePath: process.env.TOONFLOW_BROWSER_TEST_EXECUTABLE, headless: true,
+      userDataDir: profile, defaultViewport: { width: 1280, height: 800 }, timeout: 15000, protocolTimeout: 20000,
+      handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
+      args: ["--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"] });
+    const contexts = await Promise.all([browser.createBrowserContext(), browser.createBrowserContext()]);
+    const pages = await Promise.all(contexts.map(context => context.newPage()));
+    const blocked: string[] = [];
+    for (const page of pages) {
+      page.setDefaultTimeout(5000);
+      await page.setRequestInterception(true);
+      page.on("request", request => {
+        if (new URL(request.url()).origin !== localOrigin) { blocked.push(request.url()); void request.abort("blockedbyclient"); }
+        else void request.continue();
+      });
+      await page.goto(localOrigin, { waitUntil: "domcontentloaded" });
+    }
+    await pages[0].type("#name", "isolated value");
+    await pages[0].click("#apply");
+    expect(await pages[0].$eval("output", element => element.textContent)).toBe("isolated value");
+    await pages[0].evaluate(() => { localStorage.setItem("isolation", "first"); document.cookie = "isolation=first"; });
+    expect(await pages[1].evaluate(() => ({ stored: localStorage.getItem("isolation"), cookie: document.cookie }))).toEqual({ stored: null, cookie: "" });
+    expect(await pages[0].accessibility.snapshot()).not.toBeNull();
+    const cdp = await pages[0].createCDPSession();
+    try { expect((await cdp.send("Page.getLayoutMetrics")).cssVisualViewport.clientWidth).toBe(1280); }
+    finally { await cdp.detach(); }
+    await pages[0].evaluate(() => fetch("https://example.invalid/blocked").catch(() => undefined));
+    expect(blocked).toEqual(["https://example.invalid/blocked"]);
+    const screenshot = await pages[0].screenshot({ type: "png" });
+    expect([...screenshot.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    expect(screenshot.length).toBeGreaterThan(100);
+    await writeAtomic(join(profile, "compatibility.png"), screenshot);
+    await contexts[0].close();
+    expect(pages[0].isClosed()).toBe(true);
+    expect(await pages[1].title()).toBe("Local browser regression");
+    await contexts[1].close();
+    console.info("隔离浏览器兼容证据", JSON.stringify({ version: await browser.version(), profile, screenshotBytes: screenshot.length }));
+    await browser.close();
+    expect(browser.connected).toBe(false);
+  } finally {
+    try { if (browser?.connected) await browser.close(); }
+    finally { await local.stop(true); }
+  }
+}, 45000);
+
 test("真实 HTTP：认证隔离、任务、合成结果审片与人工费用核对", async () => {
   if (!isolatedProcess) {
     const childDirectory = await mkdtemp(join(tmpdir(), "toonflowBusinessFlow"));
@@ -108,6 +289,20 @@ test("真实 HTTP：认证隔离、任务、合成结果审片与人工费用核
     return;
   }
   expect((await request("settings/get")).status).toBe(401);
+  const compressed = gzipSync(JSON.stringify({ username: "flowAdmin", password }));
+  const compressedHeaders = { "content-type": "application/json", "content-encoding": "gzip" };
+  const compressedLogin = await request("auth/login", "", { method: "POST", headers: compressedHeaders, body: compressed });
+  expect(compressedLogin.status).toBe(200);
+  const compressedCookie = compressedLogin.headers.get("set-cookie")?.split(";")[0];
+  expect(compressedCookie).toBeDefined();
+  expect((await request("settings/get", compressedCookie)).status).toBe(200);
+  const malformed = await request("auth/login", "", {
+    method: "POST", headers: compressedHeaders, body: Buffer.concat([compressed, Buffer.from("invalidTrailer")]),
+  });
+  expect(malformed.status).toBe(400);
+  expect(malformed.headers.get("set-cookie")).toBeNull();
+  expect((await request("settings/get")).status).toBe(401);
+  expect((await request("settings/get", compressedCookie)).status).toBe(200);
   const admin = await login("flowAdmin");
   const catalogRequests: string[] = [];
   const catalog = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(req) {

@@ -10,7 +10,7 @@
   "dependencies": {
     "@deepseek-ai/dsh-web-search-deepseek": "0.1.5-rc.2",
     "duck-duck-scrape": "^2.2.7",
-    "zod": "^4.6.2"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@toonflow/tools-scaffold": "workspace:*"

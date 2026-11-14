@@ -30,6 +30,15 @@
 
 项目介绍提供以上 21 种语言版本，与[应用支持的语言](../README.md#languages)保持一致。
 
+## 当前状态与验收
+
+- [历史归档索引](archive/round46/readme.md)：整理前的README、开发指南及完整轮次记录。
+
+- [开发计划](../ROADMAP.md)：当前优先级与暂停事项。
+- [验收记录](../ACCEPTANCE.md)：区分主工作区、副本与历史证据。
+- [能力地图](../CAPABILITY-MAP.md)：能力范围及验证缺口。
+- 阶段性 Plan 文档、Docker 演练和迭代记录保留为历史参考；其中旧版本、旧环境和未执行计划不代表当前状态。
+
 ## 使用与开发
 
 - [使用教程](https://qcn7xdsqgc4z.feishu.cn/docx/RXFqdgR2Xo0dXZxGfd0cZCGgnwf)：日常操作与创作流程。

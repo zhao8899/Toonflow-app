@@ -2,7 +2,7 @@
 
 [返回 Toonflow 首页](../README.md) · [文档目录](./readme.md) · [贡献指南](../CONTRIBUTING.md) · [开发规范](../AGENTS.md)
 
-本文收录插件开发、源码运行、桌面打包和更新发布的详细说明。首次参与开发，可先阅读贡献指南。
+本文维护运行、扩展与构建方法；发布章节为操作参考，执行前须单独授权。当前验证范围见[验收记录](../ACCEPTANCE.md)，旧版说明见[归档](archive/round46/developmentHistory.md)。
 
 ## 🧩 插件与模型扩展
 
@@ -17,7 +17,7 @@
 
 节点与工具的配置表单统一使用 `@form-create/element-ui` 的规则；有必填项未填写时，配置按钮会显示红点。工具只接收自身配置，宿主不向工具直接传递完整应用设置。
 
-媒体接口包含图片、视频和音频的扩展类型，实际能力由各提供方实现；当前内置 TF-Router 媒体适配提供图片与视频生成。技能既可以全局安装，也可以放在当前工作区的 `skill/` 目录，同名时优先使用工作区版本。
+媒体接口包含图片、视频和音频的扩展类型，实际能力由各提供方实现；默认初始化媒体适配为道成云，已有配置与插件保留；具体支持范围以已安装适配及明确保存的能力为准。技能既可以全局安装，也可以放在当前工作区的 `skill/` 目录，同名时优先使用工作区版本。
 
 需要从外部 Coding 工具操作 Toonflow 时，在“设置 → MCP”开启服务并复制客户端配置，支持 HTTP 与 stdio 连接。画布和节点等界面操作需要保持 Toonflow 窗口或网页打开，详见 [MCP 接入说明](../packages/mcp/README.md)。
 
@@ -56,7 +56,7 @@ Windows 安装器负责注册协议；macOS 需要将应用放入 `/Applications
 
 | 层级 | 技术 |
 | --- | --- |
-| 运行时与包管理 | Bun 1.3.14、Bun Workspaces |
+| 运行时与包管理 | package.json指定Bun 1.3.14、Bun Workspaces；近期本机验收为1.4.3，不推定Docker版本行为相同 |
 | 前端 | Vue 3、Vite、TypeScript、Pinia、Element Plus、Vue Flow |
 | 服务端 | Bun、Express 5、Zod |
 | Agent | Pi Agent SDK、工具插件、Markdown 技能与记忆 |
@@ -311,3 +311,7 @@ data/                  本机运行数据，不提交到仓库
 ```
 
 ---
+
+## 既有回归
+
+根目录显式执行 bun test ./apps/server/tests ./apps/web/tests，避免扫描recovery副本。浏览器用例需显式指定浏览器，skip不算浏览器验收通过。测试、类型及构建分别报告。

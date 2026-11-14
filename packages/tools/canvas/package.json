@@ -11,7 +11,7 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "zod": "^4.6.2",
+    "zod": "^4.6.6",
     "@tabler/icons-vue": "^3.46.0"
   },
   "peerDependencies": {

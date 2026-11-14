@@ -13,7 +13,7 @@
     "@toonflow/file": "workspace:*",
     "@a2a-js/sdk": "1.2.0",
     "fflate": "^0.8.3",
-    "zod": "^4.6.2"
+    "zod": "^4.6.6"
   },
   "peerDependencies": { "express": "^5.2.1" },
   "devDependencies": { "@types/express": "^5.0.6" }

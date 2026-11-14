@@ -170,6 +170,7 @@ import mediaTaskCost from "./mediaTaskCost.vue";
 const visible = defineModel<boolean>({ default: false });
 const activityDay = ref(new Date().toISOString().slice(0, 10));
 const exportingActivity = ref(false);
+let activityExportController: AbortController | undefined;
 const logTaskId = ref("");
 const logRange = ref<[string, string]>([new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10)]);
 const logsWarning = ref("");
@@ -274,7 +275,7 @@ function closePreview() {
   previewUrl.value = ""; previewVisible.value = false; previewLoading.value = "";
   previewError.value = ""; previewTarget.value = undefined;
 }
-onBeforeUnmount(() => { disposed = true; closePreview(); downloadController?.abort(); });
+onBeforeUnmount(() => { disposed = true; closePreview(); downloadController?.abort(); clearActivityExport(); });
 watch(previewVisible, value => { if (!value) closePreview(); }, { flush: "sync" });
 function mediaError(event: Event) {
   const source = event.currentTarget as HTMLMediaElement | HTMLImageElement;
@@ -301,17 +302,24 @@ async function preview(taskId: string, file: GeneratedMedia) {
     if (!controller.signal.aborted && previewController === controller) previewError.value = `预览文件读取失败：${message(cause)}。可重新加载或下载原文件。`;
   } finally { if (previewController === controller) previewLoading.value = ""; }
 }
+function clearActivityExport() {
+  activityExportController?.abort(); activityExportController = undefined;
+  exportingActivity.value = false;
+}
 async function exportActivity() {
-  if (!activityDay.value || exportingActivity.value) return;
+  if (!activityDay.value || exportingActivity.value || disposed || !visible.value || !canManageCosts.value) return;
+  const controller = new AbortController(); activityExportController = controller;
   exportingActivity.value = true;
   const day = activityDay.value;
   try {
-    const { data } = await axios.get("/api/activity/export", { params: { day }, headers: { "x-toonflow-workspace": "1" }, timeout: 30000 });
+    const { data } = await axios.get("/api/activity/export", { params: { day }, headers: { "x-toonflow-workspace": "1" }, signal: controller.signal, timeout: 30000 });
+    if (controller.signal.aborted || activityExportController !== controller) return;
     if (data.code !== 200) throw new Error(data.message);
     await saveFile(new Blob([JSON.stringify(data.data, null, 2)], { type: "application/json" }), `activity${day.replaceAll('-', '')}.json`);
-  } catch (cause) { ElMessage.error(message(cause)); }
-  finally { exportingActivity.value = false; }
+  } catch (cause) { if (!controller.signal.aborted && activityExportController === controller) ElMessage.error(message(cause)); }
+  finally { if (activityExportController === controller) { activityExportController = undefined; exportingActivity.value = false; } }
 }
+watch(activityDay, clearActivityExport, { flush: "sync" });
 const workspaceStore = useWorkspaceStore();
 const directory = computed(() => workspaceStore.project?.directory);
 const projectId = computed(() => workspaceStore.project?.serverProjectId);
@@ -567,6 +575,7 @@ async function exportCosts() {
 }
 
 watch([visible, directory, projectId, canManageCosts], () => {
+  clearActivityExport();
   clearTaskLogs(); logTaskId.value = "";
   closePreview();
   downloadController?.abort(); downloadController = undefined;

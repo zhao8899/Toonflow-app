@@ -9,8 +9,8 @@
   "dependencies": {
     "@toonflow/file": "workspace:*",
     "@vitejs/plugin-vue": "^6.0.8",
-    "vite": "^8.2.2",
-    "zod": "^4.6.2"
+    "vite": "^8.2.4",
+    "zod": "^4.6.6"
   },
   "devDependencies": { "@form-create/element-ui": "^3", "typescript": "~6.0.3", "vue-tsc": "^3.3.11" }
 }

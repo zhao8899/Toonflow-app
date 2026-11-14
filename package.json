@@ -17,6 +17,9 @@
   "patchedDependencies": {
     "@vue-flow/core@1.48.2": "patches/vueFlowCore.patch"
   },
+  "overrides": {
+    "undici": "8.12.2"
+  },
   "workspaces": [
     "apps/*",
     "packages/*",
