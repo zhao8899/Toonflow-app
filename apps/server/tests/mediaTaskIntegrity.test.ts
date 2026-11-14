@@ -405,4 +405,26 @@ if (!childRoot) {
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     }
   });
+  test("生成准备等待期间撤销授权不创建任务或调用供应商", async () => {
+    const { addMediaProvider } = await import("../src/utils/media/provider");
+    const { submitMediaGeneration } = await import("../src/utils/media/generation");
+    const directory = mkdtempSync(join(childRoot, "inflightGrant"));
+    let calls = 0;
+    const supplier = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() { calls++; return new Response("unexpected"); } });
+    try {
+      await addMediaProvider(`export default { id:"inflightGrant", label:"Local", rules:[], models:[{id:"video",label:"Video",type:"video",mode:["text"],audio:false,durationResolutionMap:[{duration:[4],resolution:["720p"]}]}], async generateVideo() { await this.tool.fetch("http://127.0.0.1:${supplier.port}/generate"); return []; } };`);
+      let revoked = false, checks = 0, settled = false;
+      let operation: Promise<unknown>;
+      await withFileAccess([join(childRoot, "data/providers/inflightGrant.ts")], "write", async () => {
+        operation = submitMediaGeneration(directory, "video", {providerId:"inflightGrant",modelId:"video",prompt:"local only",mode:"text",duration:4,resolution:"720p",generateAudio:false}, crypto.randomUUID(), undefined, () => { checks++; if (revoked) throw Object.assign(new Error("授权已撤销"), { status: 403 }); });
+        void operation.then(() => { settled = true; }, () => { settled = true; });
+        await new Promise(resolve => setTimeout(resolve, 150));
+        expect(checks).toBeGreaterThan(0); expect(settled).toBe(false);
+        revoked = true;
+      });
+      await expect(operation!).rejects.toThrow("授权已撤销");
+      expect(calls).toBe(0); expect(listMediaTasks(directory).total).toBe(0);
+    } finally { await supplier.stop(true); }
+  });
+
 }

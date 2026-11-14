@@ -38,6 +38,7 @@ function createPage(role: "admin" | "user" = "admin", required = true, cost = fa
   const actions: (Pending & { url: string; body: any })[] = [];
   const errors: string[] = [];
   const saved: { content: Blob; name: string }[] = [];
+  const fileRequests: { signal: AbortSignal; resolve: (value: any) => void }[] = [];
   const records: (Pending & { body: any })[] = [], writes: (Pending & { body: any })[] = [];
   const confirmations: { message: string; resolve: () => void; reject: (cause: unknown) => void }[] = [];
   const timers = new Map<number, () => void>();
@@ -67,8 +68,11 @@ function createPage(role: "admin" | "user" = "admin", required = true, cost = fa
     if (id === "element-plus") return { ElMessage: { error(message: string) { errors.push(message); } }, ElMessageBox: { confirm: (message: string) => new Promise<void>((resolve, reject) => confirmations.push({ message, resolve, reject })) } };
     if (id === "@/stores/workspace") return { useWorkspaceStore: () => workspace };
     if (id === "@/lib/auth") return { userRole, authRequired };
-    if (id === "@/lib/workspaceFiles") return () => {};
-    if (id === "@/lib/saveFile") return async (content: Blob, name: string) => { saved.push({ content, name }); return true; };
+    if (id === "@/lib/workspaceFiles") return () => ({
+      read: (_path: string, options: { signal: AbortSignal }) => new Promise(resolve => fileRequests.push({ ...options, resolve })),
+      acquireUrl: (_path: string, _mime: string, options: { signal: AbortSignal }) => ({ url: new Promise(resolve => fileRequests.push({ ...options, resolve })), release() {} }),
+    });
+    if (id === "@/lib/saveFile") return async (content: Blob | (() => Promise<Blob>), name: string) => { const value = typeof content === "function" ? await content() : content; saved.push({ content: value, name }); return true; };
     if (id.endsWith(".vue")) return { render: () => null };
     throw new Error(`Unexpected component dependency: ${id}`);
   };
@@ -94,7 +98,7 @@ function createPage(role: "admin" | "user" = "admin", required = true, cost = fa
   dispose.push(stop);
   const text = (target: HostNode): string => target.text + target.children.map(text).join("");
   const alerts = (target: HostNode): string[] => [...(target.props.role === "alert" ? [text(target)] : []), ...target.children.flatMap(alerts)];
-  return { requests, records, writes, actions, errors, saved, confirmations, stop, get state() { return state; }, userRole, modelValue, workspace, timers, reload: () => state!.load(), text: () => text(root), alerts: () => alerts(root) };
+  return { requests, records, writes, actions, errors, saved, fileRequests, confirmations, stop, get state() { return state; }, userRole, modelValue, workspace, timers, reload: () => state!.load(), text: () => text(root), alerts: () => alerts(root) };
 }
 
 const healthy = { bytes: 1048576, files: 4, limits: { maxBytes: 10485760, maxFiles: 100, maxRecordBytes: 1000, minFreeBytes: 1000 }, availableBytes: 1000000, blocked: false, reason: null as string | null, rejected: 2, lastRejectedAt: 1, lastScannedAt: 2, lastRejectedReason: null as string | null };
@@ -737,4 +741,32 @@ for (const status of [401, 403, 404, 500]) test(`任务刷新${status}时授权�
   expect(page.state.total.value).toBe(status === 500 ? 1 : 0);
   expect(page.state.previewVisible.value).toBe(status === 500);
   expect(page.state.loadError.value).toBe("访问失败");
+});
+
+for (const operation of ["preview", "download"] as const) test(`撤权刷新后${operation}迟到响应不恢复预览或保存文件`, async () => {
+  let denied = false;
+  const page = createPage("user", true, false, () => denied ? Promise.reject({ response: { status: 404, data: { message: "项目不存在" } } }) : Promise.resolve({ data: { code: 200, data: { tasks: [], total: 0, corruptCount: 0, corruptTaskIds: [] } } }));
+  await flush();
+  const pending = page.state[operation]("task", { path: "sample.mp4", mimeType: "video/mp4", mediaType: "video" });
+  await flush();
+  expect(page.fileRequests).toHaveLength(1);
+  denied = true; await page.state.load();
+  expect(page.fileRequests[0]!.signal.aborted).toBe(true);
+  page.fileRequests[0]!.resolve(operation === "preview" ? "blob:late" : new ArrayBuffer(4));
+  await pending; await flush();
+  expect(page.state.previewUrl.value).toBe("");
+  expect(page.state.previewVisible.value).toBe(false);
+  expect(page.saved).toHaveLength(0);
+  expect(page.state.downloadNotice.value).toBe("");
+});
+
+test("项目上下文失效后迟到任务列表不恢复旧数据", async () => {
+  let finish: (value: unknown) => void;
+  const page = createPage("user", true, false, () => new Promise(resolve => { finish = resolve; }));
+  await flush();
+  page.modelValue.value = false; await flush();
+  finish!({ data: { code: 200, data: { tasks: [{ id: "lateTask" }], total: 1, corruptCount: 0, corruptTaskIds: [] } } });
+  await flush();
+  expect(page.state.tasks.value).toEqual([]);
+  expect(page.state.total.value).toBe(0);
 });

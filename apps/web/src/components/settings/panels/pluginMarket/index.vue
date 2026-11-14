@@ -36,7 +36,7 @@
           class="filterButton"
           type="button"
           :disabled="type === 'agent' && !agentMarketEnabled"
-          :title="type === 'agent' && !agentMarketEnabled ? '测试阶段，暂未开放' : undefined"
+          :title="type === 'agent' && !agentMarketEnabled ? '当前版本暂不支持' : undefined"
           :aria-pressed="selectedType === type"
           @click="selectedType = type">
           {{ category.label }}
@@ -143,7 +143,7 @@
                 </el-button>
               </template>
             </el-popconfirm>
-            <el-text v-else type="info" size="small">{{ plugin.type === 'agent' && !agentMarketEnabled ? '测试阶段，暂未开放' : '暂不支持安装' }}</el-text>
+            <el-text v-else type="info" size="small">{{ plugin.type === 'agent' && !agentMarketEnabled ? '当前版本暂不支持' : '暂不支持安装' }}</el-text>
             <div class="pluginActions">
               <component
                 :is="plugin.isCollected ? IconStarFilled : IconStar"
@@ -283,7 +283,7 @@ import { installPluginFile } from "../../installPluginFile";
 
 const { visible = true } = defineProps<{ visible?: boolean }>();
 const associationsVisible = ref(false);
-// ACT: Agent 插件市场仍在测试，暂时关闭入口。
+// ACT: 当前版本关闭 Agent 插件市场入口。
 const agentMarketEnabled = false;
 const pluginTypes = {
   node: { label: "节点", path: "nodes", icon: IconBox, tagType: "primary" },
@@ -674,7 +674,7 @@ async function installFile(event: Event) {
       ? "skill"
       : undefined;
     if (!type) throw new Error("请选择文件扩展 ext-*.umd.js、Agent .agent.zip、节点 .umd.js、工具 .tool.js 或技能 .zip、.md、.tar、.tar.gz、.tgz 文件");
-    if (type === "agent" && !agentMarketEnabled) throw new Error("Agent 功能处于测试阶段，暂未开放安装");
+    if (type === "agent" && !agentMarketEnabled) throw new Error("Agent 功能处于当前版本暂不支持安装");
     await installPluginFile(type, file);
     ElMessage.success(`${pluginTypes[type].label}已安装`);
   } catch (error) {

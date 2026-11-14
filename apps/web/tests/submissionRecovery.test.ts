@@ -68,7 +68,7 @@ async function createPage(recovery = false, withProject = true, sharedStorage?: 
     setItem(key: string, value: string) { if (storage.failWrite) throw new Error("storage unavailable"); saved.set(key, value); },
     removeItem(key: string) { if (storage.failRemove) throw new Error("storage unavailable"); saved.delete(key); },
   };
-  const account = { id: "accountOne" };
+  const account = { id: "accountOne", disabled: false };
   const requests: Request[] = [], gets: string[] = [], submitted: string[] = [];
   const props = vue.reactive<{ project?: typeof project; modelValue: boolean }>({ project: withProject ? { ...project } : undefined, modelValue: true });
   function request(url: string, body: any, options: { headers?: Record<string, string> } = {}) {
@@ -77,7 +77,7 @@ async function createPage(recovery = false, withProject = true, sharedStorage?: 
   const axios = {
     get(url: string, options?: any) {
       gets.push(url);
-      if (url === "/api/auth/session") return Promise.resolve(success({ id: account.id }));
+      if (url === "/api/auth/session") return account.disabled ? Promise.reject({ isAxiosError: true, response: { status: 401, data: { message: "账号已禁用" } } }) : Promise.resolve(success({ id: account.id }));
       if (url.endsWith("/models")) return Promise.resolve(success([{ type: "video", providerId: "synthetic", modelId: "video", mode: ["text"], audio: false, durationResolutionMap: [{ duration: [4], resolution: ["720p"] }] }]));
       if (url.endsWith("/quota")) return Promise.resolve(success({ enabled: true, remaining: 10, limit: 10, used: 0, resetAt: 1 }));
       return request(url, options?.params, options);
@@ -682,4 +682,16 @@ test("工作区目录等待透传停止与超时信号，真实generation run解
     expect(state.generating.value).toBe(false);
     expect(generated).toBe(false);
   }
+});
+
+test("生成提交迟到202在账号禁用后不解锁或通知成功", async () => {
+  const page = await createPage(); page.state.prompt.value = "local prompt";
+  const operation = page.state.submit(); await flush();
+  expect(page.requests).toHaveLength(1);
+  page.account.disabled = true;
+  page.requests[0]!.resolve(success(task(page.requests[0]!.body.requestId), 202));
+  await operation; await flush();
+  expect(page.saved.has(storageKey)).toBe(true);
+  expect(page.submitted).toEqual([]);
+  expect(page.state.prompt.value).toBe("local prompt");
 });

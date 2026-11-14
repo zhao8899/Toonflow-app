@@ -509,8 +509,32 @@ test("真实 HTTP：认证隔离、任务、合成结果审片与人工费用核
   expect(await readResult("reviewHistory")).toEqual([secondReview, firstReview]);
   expect(await readResult("costHistory")).toEqual(ledger);
   expect((await readResult("costExport", new URLSearchParams({ directory }))).tasks.find((item: { id: string }) => item.id === resultId).cost).toEqual(ledger.current);
+  for (const revoke of ["none", "member", "account"] as const) {
+    for (const snapshot of [false, true]) {
+      expect((await request("projects/members", admin, json("PUT", { id: projectId, members: [memberId] }))).status).toBe(200);
+      expect((await request("users/setStatus", admin, json("PUT", { userId: memberId, status: "active" }))).status).toBe(200);
+      const currentMember = revoke === "account" && snapshot ? await login("flowMember") : member;
+      let queuedRead: Promise<Response>;
+      let settled = false;
+      const queuedQuery = new URLSearchParams({ directory, path: "range.txt", ...(snapshot ? { snapshot: "true" } : {}) });
+      await withFileAccess([join(directory, "range.txt")], "write", async () => {
+        queuedRead = request(`workspaces/files/read?${queuedQuery}`, currentMember, { headers }).then(response => { settled = true; return response; });
+        await new Promise(resolve => setTimeout(resolve, 150));
+        expect(settled).toBe(false);
+        if (revoke === "member") expect((await request("projects/members", admin, json("PUT", { id: projectId, members: [] }))).status).toBe(200);
+        if (revoke === "account") expect((await request("users/setStatus", admin, json("PUT", { userId: memberId, status: "disabled" }))).status).toBe(200);
+      });
+      const result = await queuedRead!;
+      expect(result.status).toBe(revoke === "member" ? 404 : revoke === "account" ? 401 : 200);
+      if (revoke === "none") expect(snapshot ? (await result.json()).data.text : await result.text()).toBe(contents);
+      else expect(await result.text()).not.toContain(contents);
+    }
+  }
+
+  expect((await request("users/setStatus", admin, json("PUT", { userId: memberId, status: "active" }))).status).toBe(200);
+  const revokedMember = await login("flowMember");
   expect((await request("projects/members", admin, json("PUT", { id: projectId, members: [] }))).status).toBe(200);
-  expect((await request(`workspaces/files/read?${query}`, member, { headers })).status).toBe(404);
-  expect((await request("ai/media/tasks/review", member, scopedJson({ ...reviewInput, revision: 2 }))).status).toBe(404);
-  expect((await request(`ai/media/tasks/reviewHistory?${resultQuery}`, member, { headers })).status).toBe(404);
+  expect((await request(`workspaces/files/read?${query}`, revokedMember, { headers })).status).toBe(404);
+  expect((await request("ai/media/tasks/review", revokedMember, scopedJson({ ...reviewInput, revision: 2 }))).status).toBe(404);
+  expect((await request(`ai/media/tasks/reviewHistory?${resultQuery}`, revokedMember, { headers })).status).toBe(404);
 }, 30000);
