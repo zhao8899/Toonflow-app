@@ -352,6 +352,12 @@ function saveDocumentNode(directory: string, canvasPath: string, nodeId: string,
       }
     }
 
+    @container workspaceTools (max-width: 1200px) {
+      .panelSwitcher {
+        top: 64px;
+      }
+    }
+
     .bottomTools {
       position: absolute;
       bottom: 15px;

@@ -22,7 +22,7 @@ const rules = [
   },
 ] as const;
 
-const version = "2.0.1";
+const version = "2.0.2";
 
 function mediaUrl(input: MediaInput) {
   if (input.type === "url") return input.url;
@@ -119,7 +119,7 @@ export default {
       mode: ["text", "singleImage"],
       audio: "optional",
       durationResolutionMap: [
-        { duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution: ["480p", "720p", "1080p"] },
+        { duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution: ["720p", "1080p"] },
       ],
     },
   ] satisfies ProviderModel[],
@@ -132,7 +132,7 @@ export default {
     }
     if (request.other && Object.keys(request.other).length) throw new Error("当前道成云适配暂不支持扩展参数");
     if (request.duration !== undefined && (!Number.isInteger(request.duration) || request.duration < 4 || request.duration > 15)) throw new Error("视频时长须为 4～15 的整数秒，实际可用范围以渠道响应为准");
-    if (request.resolution !== undefined && !["480p", "720p", "1080p"].includes(request.resolution)) throw new Error("当前支持 480p、720p 或 1080p");
+    if (request.resolution !== undefined && !["720p", "1080p"].includes(request.resolution)) throw new Error("当前支持 720p 或 1080p");
 
     const image = (input: MediaInput, role: string) => ({ type: "image_url", image_url: { url: mediaUrl(input) }, role });
     const content: Record<string, unknown>[] = [{ type: "text", text: request.prompt }];

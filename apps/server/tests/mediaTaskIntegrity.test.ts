@@ -31,6 +31,15 @@ if (!childRoot) {
   const { listMediaTasks, startMediaTask, getMediaTask, getMemberGenerationQuota, exportMediaTaskCosts, cancelMediaTask } = await import("../src/utils/media/tasks");
   const { registerProject } = await import("../src/utils/workspace/projects");
 
+  test("道成云拒绝通道不支持的480p且不发送生成请求", async () => {
+    const { default: provider } = await import("@toonflow/providers/media/daochengCloud");
+    let calls = 0;
+    const context = { config: { apiKey: crypto.randomUUID() }, tool: { fetch: async () => { calls++; throw new Error("不应发送请求"); } } } as unknown as ProviderContext;
+    expect(provider.models[0].durationResolutionMap[0].resolution).toEqual(["720p", "1080p"]);
+    await expect(provider.generateVideo.call(context, { model: "doubao-seedance-2-0-260128", prompt: "杯子", duration: 4, resolution: "480p" })).rejects.toThrow("当前支持 720p 或 1080p");
+    expect(calls).toBe(0);
+  });
+
   test("启动兼容处理保留已有供应商配置，仅补充市场密钥", async () => {
     const { default: conf } = await import("../src/utils/conf");
     const { default: migrateProviderDefaults } = await import("../src/utils/providerDefaults");
