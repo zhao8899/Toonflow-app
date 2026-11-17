@@ -125,7 +125,24 @@ if (!childRoot) {
       expect(readFileSync(occupiedOutput, "utf8")).toBe("late output conflict");
       expect(methods).toEqual(["GET"]);
       renameSync(occupiedOutput, join(directory, "retainedLateConflict"));
-      expect((await resumeMediaGeneration(directory, id)).id).toBe(id);
+      const { createApp } = await import("../src/app");
+      const app = await createApp({ dataDirectory: join(childRoot, "data"), webRoot: join(childRoot, "web") });
+      const server = app.listen(0, "127.0.0.1");
+      try {
+        await new Promise<void>((resolve, reject) => { server.once("listening", resolve); server.once("error", reject); });
+        const address = server.address();
+        if (!address || typeof address === "string") throw new Error("未取得端口");
+        const origin = `http://127.0.0.1:${address.port}`;
+        const response = await fetch(`${origin}/api/ai/media/tasks/resume`, {
+          method: "POST", headers: { origin, "x-toonflow-workspace": "1", "content-type": "application/json" },
+          body: JSON.stringify({ directory, id }),
+        });
+        expect(response.status).toBe(202);
+        expect((await response.json()).data.id).toBe(id);
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      }
       for (let attempt = 0; attempt < 100 && getMediaTask(directory, id).status !== "succeeded"; attempt++) await Bun.sleep(10);
       const completed = getMediaTask(directory, id);
       expect(completed.status).toBe("succeeded");
@@ -346,6 +363,9 @@ if (!childRoot) {
       expect((await send("projects/members", admin.cookie, { id: project.id, members: [one.id, two.id] }, {}, "PUT")).status).toBe(200);
       const headers = { "x-toonflow-project-id": project.id, "x-toonflow-user-id": one.id };
       const input = { directory, requestId: crypto.randomUUID() };
+      const resumeInput = { directory, id: crypto.randomUUID() };
+      expect((await send("ai/media/tasks/resume", "", resumeInput)).status).toBe(401);
+      expect((await send("ai/media/tasks/resume", one.cookie, resumeInput, headers)).status).toBe(403);
       expect((await send("ai/media/tasks/resolveSubmission", one.cookie, input, { "x-toonflow-project-id": project.id })).status).toBe(403);
       expect((await send("ai/media/tasks/resolveSubmission", one.cookie, input, { ...headers, "x-toonflow-user-id": two.id })).status).toBe(403);
       const closed = await send("ai/media/tasks/resolveSubmission", one.cookie, input, headers);
