@@ -40,6 +40,51 @@ if (!childRoot) {
     expect(calls).toBe(0);
   });
 
+  test("道成云成片代理502后仅从同一已成功任务读取可信原片，且不转发令牌", async () => {
+    const { default: provider } = await import("@toonflow/providers/media/daochengCloud");
+    const id = "task_existing";
+    const baseUrl = "https://www.fytoken.net/v1";
+    const original = "https://fixture.volcvideo.com/video.mp4?signature=fixture";
+    const sample = new Uint8Array([0, 0, 0, 8, 102, 116, 121, 112]);
+    await Promise.all([
+      { taskId: id, url: original, proxyStatus: 502, fallback: true },
+      { taskId: id, url: original, proxyStatus: 200, fallback: false },
+      { taskId: id, url: original, proxyStatus: 401, fallback: false },
+      { taskId: "task_other", url: original, proxyStatus: 502, fallback: false },
+      { taskId: id, url: "https://fixture.volcvideo.com.example.org/video.mp4", proxyStatus: 502, fallback: false },
+      { taskId: id, url: "https://fixture.volcvideo.com:8443/video.mp4", proxyStatus: 502, fallback: false },
+      { taskId: id, url: original, proxyStatus: 502, fallback: false, base: "https://other.example/v1" },
+    ].map(async ({ taskId, url, proxyStatus, fallback, base = baseUrl }) => {
+      const calls: string[] = [];
+      const key = crypto.randomUUID();
+      const context = { config: { apiKey: key, baseUrl: base }, tool: { fetch: async (input: string, init: RequestInit) => {
+        calls.push(input);
+        expect(init.method ?? "GET").toBe("GET");
+        expect(init.redirect).toBe("error");
+        if (input === `${base}/video/generations/${id}`) {
+          expect(new Headers(init.headers).get("authorization")).toBe(`Bearer ${key}`);
+          return Response.json({ code: "success", data: { status: "SUCCESS", task_id: taskId,
+            data: { data: { data: { content: { video_url: url } } } } } });
+        }
+        if (input === `${base}/videos/${id}/content`) {
+          expect(new Headers(init.headers).get("authorization")).toBe(`Bearer ${key}`);
+          return new Response(proxyStatus === 200 ? sample : null, { status: proxyStatus, headers: { "content-type": "video/mp4" } });
+        }
+        expect(input).toBe(original);
+        expect(new Headers(init.headers).has("authorization")).toBe(false);
+        return new Response(sample, { headers: { "content-type": "video/mp4" } });
+      } } } as unknown as ProviderContext;
+      const [result] = await Promise.allSettled([provider.resumeVideo.call(context, id)]);
+      if (fallback || proxyStatus === 200) {
+        expect(result).toEqual({ status: "fulfilled", value: [{ type: "binary", mediaType: "video", mimeType: "video/mp4", data: Buffer.from(sample) }] });
+      } else {
+        expect(result.status).toBe("rejected");
+        expect(result.status === "rejected" && result.reason.message).toContain(`HTTP ${proxyStatus}`);
+      }
+      expect(calls).toEqual([`${base}/video/generations/${id}`, `${base}/videos/${id}/content`, ...(fallback ? [original] : [])]);
+    }));
+  }, 15000);
+
   test("启动兼容处理保留已有供应商配置，仅补充市场密钥", async () => {
     const { default: conf } = await import("../src/utils/conf");
     const { default: migrateProviderDefaults } = await import("../src/utils/providerDefaults");

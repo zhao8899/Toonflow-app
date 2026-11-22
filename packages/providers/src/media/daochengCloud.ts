@@ -1,6 +1,6 @@
 /**
  * 道成云异步视频适配器，协议：https://doc.fytoken.net/openapi/relay.json。
- * 提交一次后查询平台任务，通过鉴权下载接口获取成片，不自动重发生成请求。
+ * 提交一次后查询平台任务并获取成片，不自动重发生成请求。
  */
 const defaultBaseUrl = "https://www.fytoken.net/v1";
 
@@ -22,7 +22,7 @@ const rules = [
   },
 ] as const;
 
-const version = "2.0.2";
+const version = "2.0.3";
 
 function mediaUrl(input: MediaInput) {
   if (input.type === "url") return input.url;
@@ -60,12 +60,25 @@ function connection(config: { apiKey?: string; baseUrl?: string }) {
   return { apiKey, baseUrl };
 }
 
+function originalVideoUrl(baseUrl: string, task: Record<string, unknown>, id: string) {
+  if (baseUrl !== defaultBaseUrl && baseUrl !== "https://fytoken.net/v1") return;
+  if ((task.task_id ?? task.id) !== id) return;
+  const result = (task.data as { data?: { result_url?: unknown; data?: { content?: { video_url?: unknown } } } } | undefined)?.data;
+  const candidate = result?.data?.content?.video_url ?? result?.result_url;
+  if (typeof candidate !== "string" || !URL.canParse(candidate)) return;
+  const url = new URL(candidate);
+  // ACT: 只接受已核实的火山 VOD 域，保留原签名查询参数，不使用外层代理地址。
+  if (url.protocol === "https:" && url.hostname.endsWith(".volcvideo.com") && !url.port
+    && !url.username && !url.password && !url.hash) return candidate;
+}
+
 async function videoResult(context: ProviderContext<{ apiKey?: string; baseUrl?: string }>, id: string): Promise<MediaAsset[]> {
   if (!/^[a-zA-Z0-9_-]{1,200}$/.test(id)) throw new Error("供应商任务 ID 无效");
   const { apiKey, baseUrl } = connection(context.config);
   const headers = { Authorization: `Bearer ${apiKey}` };
   const signal = AbortSignal.any([AbortSignal.timeout(30 * 60_000), ...(context.signal ? [context.signal] : [])]);
   const taskId = encodeURIComponent(id);
+  let originalUrl: string | undefined;
   while (true) {
     await wait(signal);
     const response = await context.tool.fetch(`${baseUrl}/video/generations/${taskId}`, { headers, signal, redirect: "error" });
@@ -73,11 +86,24 @@ async function videoResult(context: ProviderContext<{ apiKey?: string; baseUrl?:
     const result = object(await response.json());
     if (result.code !== "success") throw new Error(context.tool.errorMessage(result) || "查询视频任务失败");
     const task = object(result.data);
-    if (task.status === "SUCCESS") break;
+    if (task.status === "SUCCESS") {
+      originalUrl = originalVideoUrl(baseUrl, task, id);
+      break;
+    }
     if (task.status === "FAILURE") throw new Error(context.tool.errorMessage(task) || "视频生成失败，请向平台核对费用");
     if (!["NOT_START", "SUBMITTED", "QUEUED", "IN_PROGRESS"].includes(String(task.status))) throw new Error("视频任务状态未知，请在平台核对任务");
   }
-  const download = await context.tool.fetch(`${baseUrl}/videos/${taskId}/content`, { headers, signal, redirect: "error" });
+  let download = await context.tool.fetch(`${baseUrl}/videos/${taskId}/content`, { headers, signal, redirect: "error" });
+  if (download.status === 502 && originalUrl) {
+    await download.body?.cancel();
+    try {
+      // 原片签名独立鉴权，不转发聚合平台的令牌，不跟随跳转。
+      download = await context.tool.fetch(originalUrl, { signal, redirect: "error" });
+    } catch {
+      signal.throwIfAborted();
+      throw new Error("原视频文件无法读取，请在平台核对原任务");
+    }
+  }
   if (!download.ok) throw new Error(`下载视频失败：HTTP ${download.status}，请在平台下载原任务结果`);
   const mimeType = download.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
   if (!mimeType?.startsWith("video/") || !download.body) {
